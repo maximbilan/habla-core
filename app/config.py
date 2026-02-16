@@ -6,6 +6,9 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 # AWS
 # ---------------------------------------------------------------------------
+# AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are read from the environment
+# automatically by the Smithy SDK's EnvironmentCredentialsResolver in
+# nova_sonic.py.  load_dotenv() above ensures .env values are available.
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # ---------------------------------------------------------------------------
