@@ -74,6 +74,7 @@ class NovaSonicSession:
 
         self._response_task: Optional[asyncio.Task] = None
         self._on_audio_output = on_audio_output
+        self._died_unexpectedly = False
 
     # ------------------------------------------------------------------
     # Initialisation
@@ -263,6 +264,8 @@ class NovaSonicSession:
         except Exception as e:
             if self.is_active:
                 logger.error("Nova response loop error [%s]: %s", self.session_id, e)
+                self.is_active = False
+                self._died_unexpectedly = True
         finally:
             logger.info("Nova response loop ended [%s]", self.session_id)
 
