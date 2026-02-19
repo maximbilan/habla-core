@@ -41,6 +41,8 @@ from app.config import (
 logger = logging.getLogger(__name__)
 
 QUEUE_READ_TIMEOUT = 1.0  # seconds
+MAX_SESSION_RETRIES = 3
+RETRY_DELAY = 1.0  # seconds
 
 
 class TranslationBridge:
@@ -135,14 +137,24 @@ class TranslationBridge:
 
     async def _route_a_to_twilio(self) -> None:
         """Drain Session A output queue → convert → send to Twilio WS."""
+        retries = 0
         try:
-            while self._is_running(self.session_a):
+            while not self._closed:
+                if not self._is_running(self.session_a):
+                    if self.session_a and self.session_a._died_unexpectedly and retries < MAX_SESSION_RETRIES:
+                        retries += 1
+                        logger.warning("[%s] Session A died, retry %d/%d", self.call_sid, retries, MAX_SESSION_RETRIES)
+                        await asyncio.sleep(RETRY_DELAY)
+                        if not await self._restart_session_a():
+                            break
+                        continue
+                    break
+
                 chunk = await self._dequeue(self.session_a)
                 if chunk is None:
                     continue
 
                 if not self.twilio_ws or not self.twilio_stream_sid:
-                    # Twilio hasn't connected yet — drop this chunk
                     continue
 
                 mulaw = pcm_24k_to_mulaw_8k(chunk)
@@ -163,8 +175,19 @@ class TranslationBridge:
 
     async def _route_b_to_ios(self) -> None:
         """Drain Session B output queue → resample → send to iOS WS."""
+        retries = 0
         try:
-            while self._is_running(self.session_b):
+            while not self._closed:
+                if not self._is_running(self.session_b):
+                    if self.session_b and self.session_b._died_unexpectedly and retries < MAX_SESSION_RETRIES:
+                        retries += 1
+                        logger.warning("[%s] Session B died, retry %d/%d", self.call_sid, retries, MAX_SESSION_RETRIES)
+                        await asyncio.sleep(RETRY_DELAY)
+                        if not await self._restart_session_b():
+                            break
+                        continue
+                    break
+
                 chunk = await self._dequeue(self.session_b)
                 if chunk is None:
                     continue
@@ -201,6 +224,52 @@ class TranslationBridge:
             )
         except asyncio.TimeoutError:
             return None
+
+    async def _restart_session_a(self) -> bool:
+        """Restart Session A (EN→ES) after an unexpected failure."""
+        try:
+            if self.session_a:
+                try:
+                    await self.session_a.close()
+                except Exception:
+                    pass
+
+            self.session_a = NovaSonicSession(
+                session_id=f"{self.call_sid}-en-es",
+                system_prompt=EN_TO_ES_SYSTEM_PROMPT,
+                voice_id=NOVA_VOICE_ID_ES,
+                input_sample_rate=INPUT_SAMPLE_RATE,
+                output_sample_rate=OUTPUT_SAMPLE_RATE,
+            )
+            await self.session_a.start()
+            logger.info("[%s] Session A (EN→ES) restarted", self.call_sid)
+            return True
+        except Exception as e:
+            logger.error("[%s] Failed to restart Session A: %s", self.call_sid, e)
+            return False
+
+    async def _restart_session_b(self) -> bool:
+        """Restart Session B (ES→EN) after an unexpected failure."""
+        try:
+            if self.session_b:
+                try:
+                    await self.session_b.close()
+                except Exception:
+                    pass
+
+            self.session_b = NovaSonicSession(
+                session_id=f"{self.call_sid}-es-en",
+                system_prompt=ES_TO_EN_SYSTEM_PROMPT,
+                voice_id=NOVA_VOICE_ID_EN,
+                input_sample_rate=INPUT_SAMPLE_RATE,
+                output_sample_rate=OUTPUT_SAMPLE_RATE,
+            )
+            await self.session_b.start()
+            logger.info("[%s] Session B (ES→EN) restarted", self.call_sid)
+            return True
+        except Exception as e:
+            logger.error("[%s] Failed to restart Session B: %s", self.call_sid, e)
+            return False
 
     # ------------------------------------------------------------------
     # Shutdown
