@@ -232,7 +232,10 @@ async def twilio_media_stream(ws: WebSocket):
     except WebSocketDisconnect:
         logger.info("Twilio Media Stream disconnected  call=%s", call_sid)
     except Exception as e:
-        logger.error("Twilio Media Stream error: %s", e)
+        if "not connected" in str(e).lower():
+            logger.info("Twilio Media Stream closed externally  call=%s", call_sid)
+        else:
+            logger.error("Twilio Media Stream error: %s", e)
     finally:
         if call_sid:
             await call_manager.cleanup_call(call_sid)

@@ -328,10 +328,16 @@ class NovaSonicSession:
             logger.error("Error during Nova session close [%s]: %s", self.session_id, e)
 
         if self._response_task and not self._response_task.done():
-            self._response_task.cancel()
+            # Give the CRT event loop a moment to fire its _on_complete
+            # callbacks before we cancel the response reader; this avoids
+            # the "InvalidStateError: CANCELLED" from awscrt internals.
             try:
-                await self._response_task
-            except asyncio.CancelledError:
-                pass
+                await asyncio.wait_for(self._response_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                self._response_task.cancel()
+                try:
+                    await self._response_task
+                except asyncio.CancelledError:
+                    pass
 
         logger.info("Nova session %s closed", self.session_id)
