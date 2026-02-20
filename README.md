@@ -99,11 +99,11 @@ sudo mkdir -p /opt/habla-core
 sudo chown -R ubuntu:ubuntu /opt/habla-core
 cd /opt/habla-core
 git clone https://github.com/maximbilan/habla-core.git .
-sudo APP_DIR=/opt/habla-core DOMAIN=44-211-73-87.sslip.io ./deploy/ec2/bootstrap_server.sh
+sudo APP_DIR=/opt/habla-core DOMAIN=your-domain.example.com ./deploy/ec2/bootstrap_server.sh
 ```
 
 Create `/opt/habla-core/.env` from `.env.example` and set real values.
-Set `PUBLIC_URL` to your public domain (example: `https://44-211-73-87.sslip.io`).
+Set `PUBLIC_URL` to your public domain (example: `https://your-domain.example.com`).
 
 ### 2) TLS (recommended)
 
@@ -111,7 +111,7 @@ After DNS points to EC2, install certs:
 
 ```bash
 sudo apt-get install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d 44-211-73-87.sslip.io
+sudo certbot --nginx -d your-domain.example.com
 ```
 
 ### 3) GitHub Actions deploy
@@ -119,7 +119,7 @@ sudo certbot --nginx -d 44-211-73-87.sslip.io
 Workflow file: `.github/workflows/deploy-ec2.yml`
 
 Set repository **Variables**:
-- `EC2_HOST` (example: `44.211.73.87`)
+- `EC2_HOST` (example: `ec2-xx-xx-xx-xx.compute-1.amazonaws.com` or instance public IP)
 - `EC2_USER` (example: `ubuntu`)
 - `EC2_PORT` (usually `22`)
 - `EC2_APP_DIR` (example: `/opt/habla-core`)

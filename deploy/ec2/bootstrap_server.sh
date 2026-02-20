@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time EC2 setup for habla-core.
 # Usage:
-#   sudo APP_DIR=/opt/habla-core DOMAIN=44-211-73-87.sslip.io ./deploy/ec2/bootstrap_server.sh
+#   sudo APP_DIR=/opt/habla-core DOMAIN=your-domain.example.com ./deploy/ec2/bootstrap_server.sh
 
 set -euo pipefail
 
