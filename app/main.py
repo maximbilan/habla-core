@@ -21,11 +21,12 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 
-from app.config import SERVER_HOST, SERVER_PORT, TWILIO_FROM_NUMBER, PUBLIC_URL
+from app.config import SERVER_HOST, SERVER_PORT, PUBLIC_URL
 from app.models import CallRequest, CallResponse, CallStatusResponse, EndCallResponse
 from app.call_manager import CallManager, CallStatus
 from app.translation_bridge import TranslationBridge
 from app.agent import AgentCallConfig, agent_calls, initiate_agent_outbound_call
+from app.caller_id.router import router as caller_id_router
 from app.twilio_handler import (
     initiate_outbound_call,
     hangup_call,
@@ -51,6 +52,7 @@ app = FastAPI(
     version="0.1.0",
 )
 call_manager = CallManager()
+app.include_router(caller_id_router)
 
 
 class AgentCallRequest(BaseModel):
@@ -81,12 +83,14 @@ async def health():
 async def create_call(req: CallRequest):
     """Initiate an outbound translated call to a Spanish phone number."""
     try:
-        call_sid = initiate_outbound_call(req.to)
+        call_sid, caller_id = initiate_outbound_call(req.to, req.from_)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to initiate outbound call: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-    state = call_manager.create_call(call_sid, req.to, TWILIO_FROM_NUMBER)
+    state = call_manager.create_call(call_sid, req.to, caller_id)
     state.bridge = TranslationBridge(call_sid)
 
     return CallResponse(call_sid=call_sid, status=CallStatus.INITIATING)
@@ -144,7 +148,9 @@ async def twilio_webhook(request: Request):
 @app.post("/agent/call", response_model=AgentCallResponse)
 async def create_agent_call(req: AgentCallRequest):
     try:
-        call_sid = initiate_agent_outbound_call(req.to, req.from_)
+        call_sid, caller_id = initiate_agent_outbound_call(req.to, req.from_)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to initiate agent outbound call: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -153,7 +159,7 @@ async def create_agent_call(req: AgentCallRequest):
         call_sid=call_sid,
         config=AgentCallConfig(
             to_number=req.to,
-            from_number=req.from_,
+            from_number=caller_id,
             prompt=req.prompt,
             user_name=req.user_name,
             language=req.language,

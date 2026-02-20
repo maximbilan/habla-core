@@ -4,35 +4,15 @@ Twilio voice integration — outbound calls and Media Streams TwiML.
 
 import logging
 
-from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 
 from app.config import (
-    TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN,
-    TWILIO_API_SID,
-    TWILIO_API_SECRET,
-    TWILIO_FROM_NUMBER,
     PUBLIC_URL,
 )
+from app.caller_id.service import create_outbound_call, get_twilio_client
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Twilio REST client
-# ---------------------------------------------------------------------------
-
-def _get_client() -> Client:
-    """Return a configured Twilio REST client."""
-    if TWILIO_API_SID and TWILIO_API_SECRET:
-        return Client(TWILIO_API_SID, TWILIO_API_SECRET, TWILIO_ACCOUNT_SID)
-    return Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
-
-# ---------------------------------------------------------------------------
-# Outbound calling
-# ---------------------------------------------------------------------------
 
 def _media_stream_ws_url() -> str:
     """Derive the wss:// media-stream URL from PUBLIC_URL."""
@@ -44,7 +24,7 @@ def _media_stream_ws_url() -> str:
     )
 
 
-def initiate_outbound_call(to_number: str) -> str:
+def initiate_outbound_call(to_number: str, from_number: str | None = None) -> tuple[str, str]:
     """
     Place an outbound PSTN call via Twilio.
 
@@ -53,7 +33,6 @@ def initiate_outbound_call(to_number: str) -> str:
 
     Returns the Twilio Call SID.
     """
-    client = _get_client()
     ws_url = _media_stream_ws_url()
 
     twiml_xml = (
@@ -64,13 +43,13 @@ def initiate_outbound_call(to_number: str) -> str:
         "</Response>"
     )
 
-    call = client.calls.create(
-        to=to_number,
-        from_=TWILIO_FROM_NUMBER,
+    call_sid, caller_id = create_outbound_call(
+        to_number=to_number,
+        from_number=from_number,
         twiml=twiml_xml,
     )
-    logger.info("Twilio outbound call created: sid=%s  to=%s", call.sid, to_number)
-    return call.sid
+    logger.info("Twilio outbound call created: sid=%s  to=%s", call_sid, to_number)
+    return call_sid, caller_id
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +74,7 @@ def generate_media_stream_twiml() -> str:
 def hangup_call(call_sid: str) -> None:
     """Hang up a live Twilio call."""
     try:
-        client = _get_client()
+        client = get_twilio_client()
         client.calls(call_sid).update(status="completed")
         logger.info("Twilio call %s hung up", call_sid)
     except Exception as e:
@@ -105,7 +84,7 @@ def hangup_call(call_sid: str) -> None:
 def fetch_call_status(call_sid: str) -> dict:
     """Fetch call details from the Twilio API."""
     try:
-        client = _get_client()
+        client = get_twilio_client()
         call = client.calls(call_sid).fetch()
         return {
             "call_sid": call.sid,
