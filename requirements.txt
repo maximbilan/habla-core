@@ -5,5 +5,5 @@ twilio>=9.0.0
 aws-sdk-bedrock-runtime
 smithy-aws-core
 python-dotenv>=1.0.0
-audioop-lts>=0.2.0
+audioop-lts>=0.2.0; python_version >= "3.13"
 pydantic>=2.0.0
