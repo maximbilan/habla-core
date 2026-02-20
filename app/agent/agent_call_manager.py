@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from twilio.rest import Client
 from fastapi import WebSocket
 
 from app.agent.agent_bridge import AgentBridge
@@ -13,22 +12,12 @@ from app.agent.agent_nova_session import AgentNovaSession
 from app.agent.prompts import build_agent_prompt
 from app.agent.transcript import TranscriptService
 from app.config import (
-    TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN,
-    TWILIO_API_SID,
-    TWILIO_API_SECRET,
-    TWILIO_FROM_NUMBER,
     PUBLIC_URL,
     NOVA_VOICE_ID_ES,
 )
+from app.caller_id.service import create_outbound_call, get_twilio_client
 
 logger = logging.getLogger(__name__)
-
-
-def _twilio_client() -> Client:
-    if TWILIO_API_SID and TWILIO_API_SECRET:
-        return Client(TWILIO_API_SID, TWILIO_API_SECRET, TWILIO_ACCOUNT_SID)
-    return Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 
 @dataclass
@@ -192,7 +181,7 @@ class AgentCallManager:
             self._ending = True
 
             try:
-                _twilio_client().calls(self.call_sid).update(status="completed")
+                get_twilio_client().calls(self.call_sid).update(status="completed")
             except Exception:
                 pass
 
@@ -233,16 +222,13 @@ class AgentCallRegistry:
 agent_calls = AgentCallRegistry()
 
 
-def initiate_agent_outbound_call(to_number: str, from_number: str | None = None) -> str:
+def initiate_agent_outbound_call(to_number: str, from_number: str | None = None) -> tuple[str, str]:
     """Create outbound Twilio call for Agent Mode."""
-    client = _twilio_client()
-    caller_id = from_number or TWILIO_FROM_NUMBER
-
-    call = client.calls.create(
-        to=to_number,
-        from_=caller_id,
-        url=f"{PUBLIC_URL}/agent/twilio/webhook/pending",
+    call_sid, caller_id = create_outbound_call(
+        to_number=to_number,
+        from_number=from_number,
+        webhook_url=f"{PUBLIC_URL}/agent/twilio/webhook/pending",
         method="POST",
     )
-    logger.info("Agent outbound call created: sid=%s to=%s", call.sid, to_number)
-    return call.sid
+    logger.info("Agent outbound call created: sid=%s to=%s", call_sid, to_number)
+    return call_sid, caller_id
