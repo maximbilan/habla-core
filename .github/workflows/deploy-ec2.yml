@@ -77,5 +77,16 @@ jobs:
           sudo systemctl restart habla-core
           sudo systemctl is-active --quiet habla-core
 
-          curl -fsS http://127.0.0.1:8000/ >/dev/null
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/ >/dev/null; then
+              echo "Health check passed."
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "Health check failed after 30s. Service diagnostics:"
+          sudo systemctl status habla-core --no-pager -l || true
+          sudo journalctl -u habla-core -n 120 --no-pager || true
+          exit 1
           EOF
