@@ -18,11 +18,14 @@ import logging
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
+from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 
-from app.config import SERVER_HOST, SERVER_PORT, TWILIO_FROM_NUMBER
+from app.config import SERVER_HOST, SERVER_PORT, TWILIO_FROM_NUMBER, PUBLIC_URL
 from app.models import CallRequest, CallResponse, CallStatusResponse, EndCallResponse
 from app.call_manager import CallManager, CallStatus
 from app.translation_bridge import TranslationBridge
+from app.agent import AgentCallConfig, agent_calls, initiate_agent_outbound_call
 from app.twilio_handler import (
     initiate_outbound_call,
     hangup_call,
@@ -48,6 +51,21 @@ app = FastAPI(
     version="0.1.0",
 )
 call_manager = CallManager()
+
+
+class AgentCallRequest(BaseModel):
+    to: str
+    from_: str | None = Field(default=None, alias="from")
+    prompt: str
+    user_name: str = "Caller"
+    language: str = "es"
+
+    model_config = {"populate_by_name": True}
+
+
+class AgentCallResponse(BaseModel):
+    call_sid: str
+    status: str
 
 
 # ===================================================================
@@ -117,6 +135,65 @@ async def twilio_webhook(request: Request):
     """
     twiml = generate_media_stream_twiml()
     return Response(content=twiml, media_type="text/xml")
+
+
+# ===================================================================
+# REST endpoints — Agent Mode
+# ===================================================================
+
+@app.post("/agent/call", response_model=AgentCallResponse)
+async def create_agent_call(req: AgentCallRequest):
+    try:
+        call_sid = initiate_agent_outbound_call(req.to, req.from_)
+    except Exception as e:
+        logger.error("Failed to initiate agent outbound call: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    agent_calls.create(
+        call_sid=call_sid,
+        config=AgentCallConfig(
+            to_number=req.to,
+            from_number=req.from_,
+            prompt=req.prompt,
+            user_name=req.user_name,
+            language=req.language,
+        ),
+    )
+    return AgentCallResponse(call_sid=call_sid, status="initiating")
+
+
+@app.post("/agent/call/{call_sid}/end")
+async def end_agent_call(call_sid: str):
+    manager = agent_calls.get(call_sid)
+    if not manager:
+        raise HTTPException(status_code=404, detail="Agent call not found")
+    await manager.end_call()
+    return {"status": "ended"}
+
+
+@app.get("/agent/call/{call_sid}/status")
+async def get_agent_call_status(call_sid: str):
+    manager = agent_calls.get(call_sid)
+    if not manager:
+        raise HTTPException(status_code=404, detail="Agent call not found")
+    return manager.status_payload()
+
+
+@app.post("/agent/twilio/webhook/{call_sid}")
+async def agent_twilio_webhook(call_sid: str, request: Request):
+    form = await request.form()
+    twilio_call_sid = str(form.get("CallSid", call_sid))
+    ws_base = PUBLIC_URL.replace("https://", "wss://").replace("http://", "ws://")
+
+    response = VoiceResponse()
+    connect = Connect()
+    stream = Stream(
+        url=f"{ws_base}/agent/twilio/media-stream/{twilio_call_sid}",
+        track="both_tracks",
+    )
+    connect.append(stream)
+    response.append(connect)
+    return Response(content=str(response), media_type="application/xml")
 
 
 # ===================================================================
@@ -239,6 +316,77 @@ async def twilio_media_stream(ws: WebSocket):
     finally:
         if call_sid:
             await call_manager.cleanup_call(call_sid)
+
+
+# ===================================================================
+# WebSocket — Agent Mode
+# ===================================================================
+
+@app.websocket("/agent/ws/{call_sid}")
+async def agent_ios_websocket(ws: WebSocket, call_sid: str):
+    await ws.accept()
+    manager = agent_calls.get(call_sid)
+    if not manager:
+        await ws.close(code=4004, reason="Agent call not found")
+        return
+
+    await manager.attach_ios_websocket(ws)
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            data = json.loads(raw)
+            msg_type = data.get("type")
+
+            if msg_type == "instruction":
+                await manager.inject_instruction(str(data.get("text", "")))
+            elif msg_type == "end_conversation":
+                await manager.end_conversation(str(data.get("text", "")))
+            elif msg_type == "end_call":
+                await manager.end_call()
+    except WebSocketDisconnect:
+        manager.detach_ios_websocket(ws)
+    except Exception as e:
+        logger.error("[%s] Agent iOS WebSocket error: %s", call_sid, e)
+        manager.detach_ios_websocket(ws)
+
+
+@app.websocket("/agent/twilio/media-stream/{call_sid}")
+async def agent_twilio_media_stream(ws: WebSocket, call_sid: str):
+    await ws.accept()
+    manager = agent_calls.get(call_sid)
+    stream_call_sid = call_sid
+
+    try:
+        while True:
+            data = json.loads(await ws.receive_text())
+            event_type = data.get("event")
+
+            if event_type == "start":
+                stream_call_sid = data.get("start", {}).get("callSid", call_sid)
+                manager = agent_calls.get(stream_call_sid) or manager
+                if not manager:
+                    logger.error("No manager found for agent call %s", stream_call_sid)
+                    break
+
+                stream_sid = data.get("start", {}).get("streamSid", "")
+                await manager.on_twilio_start(ws, stream_sid)
+
+            elif event_type == "media" and manager:
+                payload = data.get("media", {}).get("payload")
+                if payload:
+                    await manager.handle_twilio_media(payload)
+
+            elif event_type == "stop" and manager:
+                await manager.end_call()
+                break
+    except WebSocketDisconnect:
+        if manager:
+            await manager.end_call()
+    except Exception as e:
+        logger.error("[%s] Agent Twilio WS error: %s", stream_call_sid, e)
+        if manager:
+            await manager.end_call()
 
 
 # ---------------------------------------------------------------------------
