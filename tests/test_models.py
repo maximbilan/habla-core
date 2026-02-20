@@ -15,4 +15,4 @@ def test_call_status_response_serializes_from_alias():
         from_="+1202",
     )
     payload = resp.model_dump(by_alias=True)
-    assert payload["from"] == "+1202"
+    assert payload["from_"] == "+1202"
