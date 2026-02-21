@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
@@ -137,6 +138,42 @@ def test_translation_languages_endpoint():
     assert payload["default_source_language"] == "en-US"
     assert payload["default_target_language"] == "es-US"
     assert any(item["code"] == "en-US" for item in payload["supported_languages"])
+
+
+def test_extract_form_field_from_urlencoded_body():
+    body = b"CallSid=CA12345&Direction=outbound-api"
+    value = main._extract_form_field_from_urlencoded_body(body, "CallSid")
+    assert value == "CA12345"
+
+
+def test_extract_twilio_call_sid_from_urlencoded_request_body():
+    class DummyRequest:
+        def __init__(self):
+            self.headers = {"content-type": "application/x-www-form-urlencoded"}
+
+        async def body(self):
+            return b"CallSid=CA999&Foo=bar"
+
+        async def form(self):
+            raise AssertionError("form() should not be called for urlencoded bodies")
+
+    sid = asyncio.run(main._extract_twilio_call_sid(DummyRequest(), "pending"))
+    assert sid == "CA999"
+
+
+def test_extract_twilio_call_sid_falls_back_when_form_unavailable():
+    class DummyRequest:
+        def __init__(self):
+            self.headers = {"content-type": "multipart/form-data"}
+
+        async def body(self):
+            return b""
+
+        async def form(self):
+            raise AssertionError("python-multipart not installed")
+
+    sid = asyncio.run(main._extract_twilio_call_sid(DummyRequest(), "pending"))
+    assert sid == "pending"
 
 
 def test_end_call_hangs_up_and_cleans(monkeypatch):
