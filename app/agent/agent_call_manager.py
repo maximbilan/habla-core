@@ -134,7 +134,7 @@ class AgentCallManager:
         # after session restarts.
         if not self._opening_instruction_sent:
             await self.nova_session.inject_instruction(
-                "The call is connected. Start with a brief and natural greeting, explain the reason for the call in one short sentence, then pause and wait for a response."
+                "The call is connected. Start with a brief greeting and the specific request from the user. You are asking for help from the callee, so do not ask 'How can I help you?'. After the request, pause and wait for a response."
             )
             self._opening_instruction_sent = True
 
