@@ -16,6 +16,7 @@ Endpoints:
 
 import json
 import logging
+from urllib.parse import parse_qs
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 from fastapi.responses import Response
@@ -88,6 +89,41 @@ class TranslationLanguageListResponse(BaseModel):
     default_source_language: str
     default_target_language: str
     supported_languages: list[TranslationLanguage]
+
+
+def _extract_form_field_from_urlencoded_body(body: bytes, field_name: str) -> str | None:
+    if not body:
+        return None
+
+    try:
+        parsed = parse_qs(body.decode("utf-8"), keep_blank_values=True)
+    except UnicodeDecodeError:
+        return None
+
+    values = parsed.get(field_name)
+    if not values:
+        return None
+    return values[-1]
+
+
+async def _extract_twilio_call_sid(request: Request, fallback_call_sid: str) -> str:
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    if "application/x-www-form-urlencoded" in content_type:
+        call_sid = _extract_form_field_from_urlencoded_body(await request.body(), "CallSid")
+        return call_sid or fallback_call_sid
+
+    # Fallback for environments where form parsing middleware is present.
+    try:
+        form = await request.form()
+    except AssertionError:
+        return fallback_call_sid
+    except Exception:
+        logger.exception("Failed to parse Twilio webhook form body")
+        return fallback_call_sid
+
+    call_sid = form.get("CallSid")
+    return str(call_sid) if call_sid else fallback_call_sid
 
 
 # ===================================================================
@@ -238,16 +274,12 @@ async def get_agent_call_status(call_sid: str):
 
 @app.post("/agent/twilio/webhook/{call_sid}")
 async def agent_twilio_webhook(call_sid: str, request: Request):
-    form = await request.form()
-    twilio_call_sid = str(form.get("CallSid", call_sid))
+    twilio_call_sid = await _extract_twilio_call_sid(request, call_sid)
     ws_base = PUBLIC_URL.replace("https://", "wss://").replace("http://", "ws://")
 
     response = VoiceResponse()
     connect = Connect()
-    stream = Stream(
-        url=f"{ws_base}/agent/twilio/media-stream/{twilio_call_sid}",
-        track="both_tracks",
-    )
+    stream = Stream(url=f"{ws_base}/agent/twilio/media-stream/{twilio_call_sid}")
     connect.append(stream)
     response.append(connect)
     return Response(content=str(response), media_type="application/xml")
