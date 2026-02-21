@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 from dataclasses import dataclass
 from fastapi import WebSocket
 
@@ -27,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 MAX_NOVA_RESTART_ATTEMPTS = 5
 MIN_NOVA_RESTART_INTERVAL_SECONDS = 1.5
+TRANSCRIPT_DUPLICATE_SUPPRESSION_SECONDS = 20.0
 
 
 @dataclass
@@ -66,6 +69,7 @@ class AgentCallManager:
         self._nova_restart_attempts = 0
         self._last_nova_start_monotonic = 0.0
         self._opening_instruction_sent = False
+        self._recent_transcript_emit_monotonic: dict[str, float] = {}
 
     def status_payload(self) -> dict:
         return {
@@ -180,13 +184,25 @@ class AgentCallManager:
         await self.bridge.forward_nova_audio_to_twilio(audio_data)
 
     async def handle_transcript(self, role: str, text_es: str) -> None:
-        entry = self.transcript.add_entry(role, text_es)
+        text = text_es.strip()
+        if not text:
+            return
+
+        if self._is_control_transcript_payload(text):
+            logger.info("[%s] dropping control transcript payload: %s", self.call_sid, text)
+            return
+
+        if not self._should_emit_transcript(role, text):
+            logger.info("[%s] dropping duplicate transcript payload: role=%s", self.call_sid, role)
+            return
+
+        entry = self.transcript.add_entry(role, text)
 
         await self._send_ios(
             {
                 "type": "transcript",
                 "role": role,
-                "text_es": text_es,
+                "text_es": text,
                 "text_en": None,
                 "timestamp": entry.timestamp,
             }
@@ -194,13 +210,13 @@ class AgentCallManager:
 
         async def _translate_and_emit() -> None:
             try:
-                translated = await self.transcript.translate_to_english(text_es)
+                translated = await self.transcript.translate_to_english(text)
                 entry.text_en = translated
                 await self._send_ios(
                     {
                         "type": "transcript_update",
                         "role": role,
-                        "text_es": text_es,
+                        "text_es": text,
                         "text_en": translated,
                         "timestamp": entry.timestamp,
                     }
@@ -264,6 +280,54 @@ class AgentCallManager:
         if language_code == "es-US":
             return NOVA_VOICE_ID_ES
         return default_voice_id_for_language(language_code)
+
+    def _should_emit_transcript(self, role: str, text: str) -> bool:
+        normalized = self._normalize_transcript_for_dedupe(text)
+        if not normalized:
+            return False
+
+        key = f"{role}|{normalized}"
+        now = asyncio.get_running_loop().time()
+        stale_cutoff = now - TRANSCRIPT_DUPLICATE_SUPPRESSION_SECONDS
+
+        # Keep the dedupe map bounded by evicting stale entries.
+        self._recent_transcript_emit_monotonic = {
+            existing_key: emitted_at
+            for existing_key, emitted_at in self._recent_transcript_emit_monotonic.items()
+            if emitted_at >= stale_cutoff
+        }
+
+        previous_emit = self._recent_transcript_emit_monotonic.get(key)
+        if previous_emit is not None and now - previous_emit < TRANSCRIPT_DUPLICATE_SUPPRESSION_SECONDS:
+            return False
+
+        self._recent_transcript_emit_monotonic[key] = now
+        return True
+
+    def _is_control_transcript_payload(self, text: str) -> bool:
+        stripped = text.strip()
+        lowered = stripped.lower()
+        if lowered.startswith("[additional instruction from caller]"):
+            return True
+
+        if not (stripped.startswith("{") and stripped.endswith("}")):
+            return False
+
+        try:
+            decoded = json.loads(stripped)
+        except json.JSONDecodeError:
+            return False
+
+        if not isinstance(decoded, dict):
+            return False
+
+        known_control_keys = {"interrupted", "event", "type", "status", "reason"}
+        return bool(known_control_keys.intersection(decoded.keys())) or len(decoded) <= 3
+
+    def _normalize_transcript_for_dedupe(self, text: str) -> str:
+        normalized = " ".join(text.strip().lower().split())
+        normalized = re.sub(r"[^\w\s]", "", normalized)
+        return normalized
 
 
 class AgentCallRegistry:
