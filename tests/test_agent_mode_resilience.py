@@ -1,0 +1,91 @@
+import asyncio
+
+from app.agent.agent_call_manager import (
+    AgentCallConfig,
+    AgentCallManager,
+    MAX_NOVA_RESTART_ATTEMPTS,
+)
+from app.agent.agent_nova_session import AgentNovaSession
+
+
+async def _noop_audio(_: bytes) -> None:
+    return None
+
+
+async def _noop_transcript(_: str, __: str) -> None:
+    return None
+
+
+async def _noop_status(_: str) -> None:
+    return None
+
+
+class CaptureAgentNovaSession(AgentNovaSession):
+    def __init__(self) -> None:
+        super().__init__(
+            session_id="test-session",
+            system_prompt="test",
+            voice_id="lupe",
+            on_audio_output=_noop_audio,
+            on_transcript=_noop_transcript,
+            on_agent_status=_noop_status,
+        )
+        self.sent_events: list[dict] = []
+        self.is_active = True
+        self.prompt_name = "test-prompt"
+
+    async def _send(self, event: dict) -> None:
+        self.sent_events.append(event)
+
+
+def test_inject_instruction_includes_text_input_configuration():
+    session = CaptureAgentNovaSession()
+    asyncio.run(session.inject_instruction("Hola"))
+
+    assert len(session.sent_events) == 3
+    content_start = session.sent_events[0]["event"]["contentStart"]
+    assert content_start["type"] == "TEXT"
+    assert content_start["textInputConfiguration"]["mediaType"] == "text/plain"
+
+
+def test_ensure_nova_session_throttles_rapid_restarts():
+    manager = AgentCallManager(
+        call_sid="CA_TEST",
+        config=AgentCallConfig(
+            to_number="+12025550100",
+            from_number=None,
+            prompt="Test",
+            user_name="Tester",
+            language="es",
+        ),
+    )
+
+    async def fake_start() -> None:
+        return None
+
+    manager.start_nova_session = fake_start  # type: ignore[method-assign]
+
+    first = asyncio.run(manager.ensure_nova_session())
+    second = asyncio.run(manager.ensure_nova_session())
+
+    assert first is True
+    assert second is False
+
+
+def test_ensure_nova_session_fails_after_restart_limit():
+    manager = AgentCallManager(
+        call_sid="CA_TEST",
+        config=AgentCallConfig(
+            to_number="+12025550100",
+            from_number=None,
+            prompt="Test",
+            user_name="Tester",
+            language="es",
+        ),
+    )
+    manager._nova_restart_attempts = MAX_NOVA_RESTART_ATTEMPTS
+
+    result = asyncio.run(manager.ensure_nova_session())
+
+    assert result is False
+    assert manager.status == "failed"

@@ -226,6 +226,9 @@ class AgentNovaSession:
                     "type": "TEXT",
                     "interactive": True,
                     "role": "USER",
+                    "textInputConfiguration": {
+                        "mediaType": "text/plain",
+                    },
                 }
             }
         }
