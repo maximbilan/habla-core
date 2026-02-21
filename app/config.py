@@ -28,6 +28,16 @@ SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
 PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:8000")
 
 # ---------------------------------------------------------------------------
+# Request auth (iOS -> backend)
+# ---------------------------------------------------------------------------
+# Authorization token format:
+#   HMAC-SHA256(HABLA_SECRET, HABLA_APP_BUNDLE_ID)
+#
+# Auth is enabled when HABLA_SECRET is set.
+HABLA_SECRET = os.getenv("HABLA_SECRET", "").strip()
+HABLA_APP_BUNDLE_ID = os.getenv("HABLA_APP_BUNDLE_ID", "com.maximbilan.habla-ios").strip()
+
+# ---------------------------------------------------------------------------
 # Nova 2 Sonic
 # ---------------------------------------------------------------------------
 NOVA_MODEL_ID = "amazon.nova-2-sonic-v1:0"

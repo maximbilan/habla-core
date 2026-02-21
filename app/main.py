@@ -18,7 +18,7 @@ import json
 import logging
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
@@ -36,6 +36,11 @@ from app.language_support import (
 )
 from app.agent import AgentCallConfig, agent_calls, initiate_agent_outbound_call
 from app.caller_id.router import router as caller_id_router
+from app.request_auth import (
+    auth_enabled,
+    require_authorized_request,
+    require_authorized_websocket,
+)
 from app.twilio_handler import (
     initiate_outbound_call,
     hangup_call,
@@ -61,7 +66,12 @@ app = FastAPI(
     version="0.1.0",
 )
 call_manager = CallManager()
-app.include_router(caller_id_router)
+app.include_router(caller_id_router, dependencies=[Depends(require_authorized_request)])
+
+if auth_enabled():
+    logger.info("Backend request auth enabled for iOS requests")
+else:
+    logger.warning("Backend request auth disabled (HABLA_SECRET is not set)")
 
 
 class AgentCallRequest(BaseModel):
@@ -143,7 +153,11 @@ async def health():
     return {"service": "habla", "status": "running"}
 
 
-@app.get("/translation/languages", response_model=TranslationLanguageListResponse)
+@app.get(
+    "/translation/languages",
+    response_model=TranslationLanguageListResponse,
+    dependencies=[Depends(require_authorized_request)],
+)
 async def get_translation_languages():
     return TranslationLanguageListResponse(
         default_source_language=DEFAULT_SOURCE_LANGUAGE,
@@ -152,7 +166,7 @@ async def get_translation_languages():
     )
 
 
-@app.post("/call", response_model=CallResponse)
+@app.post("/call", response_model=CallResponse, dependencies=[Depends(require_authorized_request)])
 async def create_call(req: CallRequest):
     """Initiate an outbound translated call."""
     try:
@@ -187,7 +201,11 @@ async def create_call(req: CallRequest):
     return CallResponse(call_sid=call_sid, status=CallStatus.INITIATING)
 
 
-@app.post("/call/{call_sid}/end", response_model=EndCallResponse)
+@app.post(
+    "/call/{call_sid}/end",
+    response_model=EndCallResponse,
+    dependencies=[Depends(require_authorized_request)],
+)
 async def end_call(call_sid: str):
     """Hang up and clean up an active call."""
     state = call_manager.get_call(call_sid)
@@ -199,7 +217,11 @@ async def end_call(call_sid: str):
     return EndCallResponse(call_sid=call_sid, status=CallStatus.COMPLETED)
 
 
-@app.get("/call/{call_sid}/status", response_model=CallStatusResponse)
+@app.get(
+    "/call/{call_sid}/status",
+    response_model=CallStatusResponse,
+    dependencies=[Depends(require_authorized_request)],
+)
 async def get_call_status(call_sid: str):
     """Return current call status."""
     state = call_manager.get_call(call_sid)
@@ -240,7 +262,7 @@ async def twilio_webhook(request: Request):
 # REST endpoints — Agent Mode
 # ===================================================================
 
-@app.post("/agent/call", response_model=AgentCallResponse)
+@app.post("/agent/call", response_model=AgentCallResponse, dependencies=[Depends(require_authorized_request)])
 async def create_agent_call(req: AgentCallRequest):
     language = resolve_supported_language(req.language)
     if not language:
@@ -267,7 +289,7 @@ async def create_agent_call(req: AgentCallRequest):
     return AgentCallResponse(call_sid=call_sid, status="initiating")
 
 
-@app.post("/agent/call/{call_sid}/end")
+@app.post("/agent/call/{call_sid}/end", dependencies=[Depends(require_authorized_request)])
 async def end_agent_call(call_sid: str):
     manager = agent_calls.get(call_sid)
     if not manager:
@@ -276,7 +298,7 @@ async def end_agent_call(call_sid: str):
     return {"status": "ended"}
 
 
-@app.get("/agent/call/{call_sid}/status")
+@app.get("/agent/call/{call_sid}/status", dependencies=[Depends(require_authorized_request)])
 async def get_agent_call_status(call_sid: str):
     manager = agent_calls.get(call_sid)
     if not manager:
@@ -309,6 +331,7 @@ async def ios_websocket(ws: WebSocket, call_sid: str):
     Receives: raw PCM 16-bit 16 kHz binary frames (source-language speech)
     Sends:    raw PCM 16-bit 16 kHz binary frames (translated source-language audio)
     """
+    require_authorized_websocket(ws)
     await ws.accept()
     logger.info("[%s] iOS WebSocket connected", call_sid)
 
@@ -425,6 +448,7 @@ async def twilio_media_stream(ws: WebSocket):
 
 @app.websocket("/agent/ws/{call_sid}")
 async def agent_ios_websocket(ws: WebSocket, call_sid: str):
+    require_authorized_websocket(ws)
     await ws.accept()
     manager = agent_calls.get(call_sid)
     if not manager:
