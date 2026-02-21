@@ -19,15 +19,12 @@ class DummyWS:
         self.closed = True
 
 
-def test_create_and_list_active():
+def test_create_call_and_get_call():
     manager = CallManager()
-    a = manager.create_call("CA1", "+34999", "+1202")
-    b = manager.create_call("CA2", "+34998", "+1203")
-    b.status = CallStatus.COMPLETED
+    created = manager.create_call("CA1", "+34999", "+1202")
+    fetched = manager.get_call("CA1")
 
-    active = manager.list_active()
-    assert [c.call_sid for c in active] == ["CA1"]
-    assert active[0] is a
+    assert fetched is created
 
 
 def test_cleanup_call_closes_resources_and_removes_state():
