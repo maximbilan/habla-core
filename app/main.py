@@ -3,6 +3,7 @@ Habla — FastAPI backend for real-time phone call translation.
 
 Endpoints:
     REST
+        GET  /translation/languages  List supported translation languages
         POST /call               Initiate an outbound translated call
         POST /call/{sid}/end     End an active call
         GET  /call/{sid}/status  Get call status
@@ -25,6 +26,12 @@ from app.config import SERVER_HOST, SERVER_PORT, PUBLIC_URL
 from app.models import CallRequest, CallResponse, CallStatusResponse, EndCallResponse
 from app.call_manager import CallManager, CallStatus
 from app.translation_bridge import TranslationBridge
+from app.language_support import (
+    DEFAULT_SOURCE_LANGUAGE,
+    DEFAULT_TARGET_LANGUAGE,
+    resolve_translation_languages,
+    supported_languages_payload,
+)
 from app.agent import AgentCallConfig, agent_calls, initiate_agent_outbound_call
 from app.caller_id.router import router as caller_id_router
 from app.twilio_handler import (
@@ -70,6 +77,19 @@ class AgentCallResponse(BaseModel):
     status: str
 
 
+class TranslationLanguage(BaseModel):
+    code: str
+    name: str
+    locale: str
+    default_voice_id: str
+
+
+class TranslationLanguageListResponse(BaseModel):
+    default_source_language: str
+    default_target_language: str
+    supported_languages: list[TranslationLanguage]
+
+
 # ===================================================================
 # REST endpoints
 # ===================================================================
@@ -79,9 +99,26 @@ async def health():
     return {"service": "habla", "status": "running"}
 
 
+@app.get("/translation/languages", response_model=TranslationLanguageListResponse)
+async def get_translation_languages():
+    return TranslationLanguageListResponse(
+        default_source_language=DEFAULT_SOURCE_LANGUAGE,
+        default_target_language=DEFAULT_TARGET_LANGUAGE,
+        supported_languages=supported_languages_payload(),
+    )
+
+
 @app.post("/call", response_model=CallResponse)
 async def create_call(req: CallRequest):
-    """Initiate an outbound translated call to a Spanish phone number."""
+    """Initiate an outbound translated call."""
+    try:
+        source_language, target_language = resolve_translation_languages(
+            req.source_language,
+            req.target_language,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     try:
         call_sid, caller_id = initiate_outbound_call(req.to, req.from_)
     except HTTPException:
@@ -90,8 +127,18 @@ async def create_call(req: CallRequest):
         logger.error("Failed to initiate outbound call: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
-    state = call_manager.create_call(call_sid, req.to, caller_id)
-    state.bridge = TranslationBridge(call_sid)
+    state = call_manager.create_call(
+        call_sid,
+        req.to,
+        caller_id,
+        source_language=source_language,
+        target_language=target_language,
+    )
+    state.bridge = TranslationBridge(
+        call_sid=call_sid,
+        source_language=source_language,
+        target_language=target_language,
+    )
 
     return CallResponse(call_sid=call_sid, status=CallStatus.INITIATING)
 
@@ -118,6 +165,8 @@ async def get_call_status(call_sid: str):
             status=state.status.value,
             to=state.to_number,
             from_=state.from_number,
+            source_language=state.source_language,
+            target_language=state.target_language,
         )
 
     twilio_info = fetch_call_status(call_sid)
@@ -126,6 +175,8 @@ async def get_call_status(call_sid: str):
         status=twilio_info.get("status", "unknown"),
         to=twilio_info.get("to", ""),
         from_=twilio_info.get("from_", ""),
+        source_language=DEFAULT_SOURCE_LANGUAGE,
+        target_language=DEFAULT_TARGET_LANGUAGE,
     )
 
 
@@ -211,8 +262,8 @@ async def ios_websocket(ws: WebSocket, call_sid: str):
     """
     iOS app connects here to stream audio.
 
-    Receives: raw PCM 16-bit 16 kHz binary frames (user's English speech)
-    Sends:    raw PCM 16-bit 16 kHz binary frames (translated English audio)
+    Receives: raw PCM 16-bit 16 kHz binary frames (source-language speech)
+    Sends:    raw PCM 16-bit 16 kHz binary frames (translated source-language audio)
     """
     await ws.accept()
     logger.info("[%s] iOS WebSocket connected", call_sid)
@@ -226,7 +277,7 @@ async def ios_websocket(ws: WebSocket, call_sid: str):
     state.ios_ws = ws
     bridge = state.bridge
 
-    # Start the EN→ES Nova session
+    # Start Session A (source→target)
     try:
         await bridge.start_session_a(ws)
     except Exception as e:
@@ -291,7 +342,7 @@ async def twilio_media_stream(ws: WebSocket):
                 state.twilio_ws = ws
                 state.twilio_stream_sid = stream_sid
 
-                # Start the ES→EN Nova session
+                # Start Session B (target→source)
                 await state.bridge.start_session_b(ws, stream_sid)
 
             # ── audio media

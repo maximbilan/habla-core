@@ -4,8 +4,8 @@ Translation bridge — the heart of Habla.
 For each active phone call this module runs TWO concurrent Nova 2 Sonic
 sessions and routes audio between the four endpoints:
 
-    iOS app  ←→  Session A (EN→ES)  ←→  Twilio phone call
-    iOS app  ←→  Session B (ES→EN)  ←→  Twilio phone call
+    iOS app  ←→  Session A (source→target)  ←→  Twilio phone call
+    iOS app  ←→  Session B (target→source)  ←→  Twilio phone call
 
 Audio pipeline:
     iOS mic  (PCM 16 kHz) → Session A → PCM 24 kHz → resample 8 kHz → mulaw → Twilio
@@ -30,12 +30,14 @@ from app.audio_utils import (
     pcm_24k_to_pcm_16k,
 )
 from app.config import (
-    EN_TO_ES_SYSTEM_PROMPT,
-    ES_TO_EN_SYSTEM_PROMPT,
     NOVA_VOICE_ID_EN,
     NOVA_VOICE_ID_ES,
     INPUT_SAMPLE_RATE,
     OUTPUT_SAMPLE_RATE,
+)
+from app.language_support import (
+    build_translation_system_prompt,
+    default_voice_id_for_language,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,11 +50,18 @@ RETRY_DELAY = 1.0  # seconds
 class TranslationBridge:
     """Manages the two Nova sessions and all audio routing for one call."""
 
-    def __init__(self, call_sid: str) -> None:
+    def __init__(
+        self,
+        call_sid: str,
+        source_language: str,
+        target_language: str,
+    ) -> None:
         self.call_sid = call_sid
+        self.source_language = source_language
+        self.target_language = target_language
 
-        self.session_a: Optional[NovaSonicSession] = None  # EN → ES
-        self.session_b: Optional[NovaSonicSession] = None  # ES → EN
+        self.session_a: Optional[NovaSonicSession] = None  # source → target
+        self.session_b: Optional[NovaSonicSession] = None  # target → source
 
         self.ios_ws: Optional[WebSocket] = None
         self.twilio_ws: Optional[WebSocket] = None
@@ -62,17 +71,19 @@ class TranslationBridge:
         self._closed = False
 
     # ------------------------------------------------------------------
-    # Session A — English ➜ Spanish  (iOS mic → phone speaker)
+    # Session A — source ➜ target  (iOS mic → phone speaker)
     # ------------------------------------------------------------------
 
     async def start_session_a(self, ios_ws: WebSocket) -> None:
-        """Spin up the EN→ES Nova session once the iOS app connects."""
+        """Spin up Session A once the iOS app connects."""
         self.ios_ws = ios_ws
 
         self.session_a = NovaSonicSession(
-            session_id=f"{self.call_sid}-en-es",
-            system_prompt=EN_TO_ES_SYSTEM_PROMPT,
-            voice_id=NOVA_VOICE_ID_ES,
+            session_id=f"{self.call_sid}-{self.source_language}-{self.target_language}-a",
+            system_prompt=build_translation_system_prompt(
+                self.source_language, self.target_language
+            ),
+            voice_id=self._voice_id_for_language(self.target_language),
             input_sample_rate=INPUT_SAMPLE_RATE,
             output_sample_rate=OUTPUT_SAMPLE_RATE,
         )
@@ -84,23 +95,30 @@ class TranslationBridge:
                 name=f"{self.call_sid}-a→twilio",
             )
         )
-        logger.info("[%s] Session A (EN→ES) started", self.call_sid)
+        logger.info(
+            "[%s] Session A started (%s→%s)",
+            self.call_sid,
+            self.source_language,
+            self.target_language,
+        )
 
     # ------------------------------------------------------------------
-    # Session B — Spanish ➜ English  (phone mic → iOS speaker)
+    # Session B — target ➜ source  (phone mic → iOS speaker)
     # ------------------------------------------------------------------
 
     async def start_session_b(
         self, twilio_ws: WebSocket, stream_sid: str
     ) -> None:
-        """Spin up the ES→EN Nova session once Twilio Media Streams connects."""
+        """Spin up Session B once Twilio Media Streams connects."""
         self.twilio_ws = twilio_ws
         self.twilio_stream_sid = stream_sid
 
         self.session_b = NovaSonicSession(
-            session_id=f"{self.call_sid}-es-en",
-            system_prompt=ES_TO_EN_SYSTEM_PROMPT,
-            voice_id=NOVA_VOICE_ID_EN,
+            session_id=f"{self.call_sid}-{self.target_language}-{self.source_language}-b",
+            system_prompt=build_translation_system_prompt(
+                self.target_language, self.source_language
+            ),
+            voice_id=self._voice_id_for_language(self.source_language),
             input_sample_rate=INPUT_SAMPLE_RATE,
             output_sample_rate=OUTPUT_SAMPLE_RATE,
         )
@@ -112,7 +130,12 @@ class TranslationBridge:
                 name=f"{self.call_sid}-b→ios",
             )
         )
-        logger.info("[%s] Session B (ES→EN) started", self.call_sid)
+        logger.info(
+            "[%s] Session B started (%s→%s)",
+            self.call_sid,
+            self.target_language,
+            self.source_language,
+        )
 
     # ------------------------------------------------------------------
     # Inbound audio handlers (called by the WebSocket endpoints)
@@ -225,8 +248,15 @@ class TranslationBridge:
         except asyncio.TimeoutError:
             return None
 
+    def _voice_id_for_language(self, language_code: str) -> str:
+        if language_code == "en-US":
+            return NOVA_VOICE_ID_EN
+        if language_code == "es-US":
+            return NOVA_VOICE_ID_ES
+        return default_voice_id_for_language(language_code)
+
     async def _restart_session_a(self) -> bool:
-        """Restart Session A (EN→ES) after an unexpected failure."""
+        """Restart Session A after an unexpected failure."""
         try:
             if self.session_a:
                 try:
@@ -235,21 +265,28 @@ class TranslationBridge:
                     pass
 
             self.session_a = NovaSonicSession(
-                session_id=f"{self.call_sid}-en-es",
-                system_prompt=EN_TO_ES_SYSTEM_PROMPT,
-                voice_id=NOVA_VOICE_ID_ES,
+                session_id=f"{self.call_sid}-{self.source_language}-{self.target_language}-a",
+                system_prompt=build_translation_system_prompt(
+                    self.source_language, self.target_language
+                ),
+                voice_id=self._voice_id_for_language(self.target_language),
                 input_sample_rate=INPUT_SAMPLE_RATE,
                 output_sample_rate=OUTPUT_SAMPLE_RATE,
             )
             await self.session_a.start()
-            logger.info("[%s] Session A (EN→ES) restarted", self.call_sid)
+            logger.info(
+                "[%s] Session A restarted (%s→%s)",
+                self.call_sid,
+                self.source_language,
+                self.target_language,
+            )
             return True
         except Exception as e:
             logger.error("[%s] Failed to restart Session A: %s", self.call_sid, e)
             return False
 
     async def _restart_session_b(self) -> bool:
-        """Restart Session B (ES→EN) after an unexpected failure."""
+        """Restart Session B after an unexpected failure."""
         try:
             if self.session_b:
                 try:
@@ -258,14 +295,21 @@ class TranslationBridge:
                     pass
 
             self.session_b = NovaSonicSession(
-                session_id=f"{self.call_sid}-es-en",
-                system_prompt=ES_TO_EN_SYSTEM_PROMPT,
-                voice_id=NOVA_VOICE_ID_EN,
+                session_id=f"{self.call_sid}-{self.target_language}-{self.source_language}-b",
+                system_prompt=build_translation_system_prompt(
+                    self.target_language, self.source_language
+                ),
+                voice_id=self._voice_id_for_language(self.source_language),
                 input_sample_rate=INPUT_SAMPLE_RATE,
                 output_sample_rate=OUTPUT_SAMPLE_RATE,
             )
             await self.session_b.start()
-            logger.info("[%s] Session B (ES→EN) restarted", self.call_sid)
+            logger.info(
+                "[%s] Session B restarted (%s→%s)",
+                self.call_sid,
+                self.target_language,
+                self.source_language,
+            )
             return True
         except Exception as e:
             logger.error("[%s] Failed to restart Session B: %s", self.call_sid, e)
