@@ -19,6 +19,9 @@ from app.caller_id.service import create_outbound_call, get_twilio_client
 
 logger = logging.getLogger(__name__)
 
+MAX_NOVA_RESTART_ATTEMPTS = 5
+MIN_NOVA_RESTART_INTERVAL_SECONDS = 1.5
+
 
 @dataclass
 class AgentCallConfig:
@@ -44,6 +47,8 @@ class AgentCallManager:
 
         self._ending = False
         self._end_lock = asyncio.Lock()
+        self._nova_restart_attempts = 0
+        self._last_nova_start_monotonic = 0.0
 
     def status_payload(self) -> dict:
         return {
@@ -84,7 +89,7 @@ class AgentCallManager:
         await self._send_ios({"type": "status", "status": "connected"})
 
         if not self.nova_session or not self.nova_session.is_active:
-            await self.start_nova_session()
+            await self.ensure_nova_session()
 
     async def start_nova_session(self) -> None:
         system_prompt = build_agent_prompt(self.config.prompt, self.config.user_name)
@@ -107,6 +112,29 @@ class AgentCallManager:
     async def ensure_nova_session(self) -> bool:
         if self.nova_session and self.nova_session.is_active:
             return True
+
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+
+        if self._nova_restart_attempts >= MAX_NOVA_RESTART_ATTEMPTS:
+            logger.error(
+                "[%s] Nova session restart limit reached (%d attempts)",
+                self.call_sid,
+                self._nova_restart_attempts,
+            )
+            self.status = "failed"
+            await self._send_ios({"type": "status", "status": "failed"})
+            return False
+
+        # Prevent a tight restart loop when Nova fails immediately.
+        if (
+            self._last_nova_start_monotonic > 0
+            and now - self._last_nova_start_monotonic < MIN_NOVA_RESTART_INTERVAL_SECONDS
+        ):
+            return False
+
+        self._nova_restart_attempts += 1
+        self._last_nova_start_monotonic = now
 
         try:
             await self.start_nova_session()
