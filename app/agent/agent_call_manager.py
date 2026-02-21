@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from fastapi import WebSocket
 
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 MAX_NOVA_RESTART_ATTEMPTS = 5
 MIN_NOVA_RESTART_INTERVAL_SECONDS = 1.5
 TRANSCRIPT_DUPLICATE_SUPPRESSION_SECONDS = 20.0
+AUTO_END_AFTER_FAREWELL_SECONDS = 2.5
 
 
 @dataclass
@@ -70,6 +72,8 @@ class AgentCallManager:
         self._last_nova_start_monotonic = 0.0
         self._opening_instruction_sent = False
         self._recent_transcript_emit_monotonic: dict[str, float] = {}
+        self._auto_end_task: asyncio.Task | None = None
+        self._has_callee_uttered = False
 
     def status_payload(self) -> dict:
         return {
@@ -188,6 +192,9 @@ class AgentCallManager:
         if not text:
             return
 
+        if role == "callee":
+            self._has_callee_uttered = True
+
         if self._is_control_transcript_payload(text):
             logger.info("[%s] dropping control transcript payload: %s", self.call_sid, text)
             return
@@ -225,6 +232,9 @@ class AgentCallManager:
                 logger.error("[%s] translation failed: %s", self.call_sid, exc)
 
         asyncio.create_task(_translate_and_emit())
+
+        if role == "agent" and self._has_callee_uttered and self._should_auto_end_after_agent_turn(text):
+            self._schedule_auto_end_after_farewell()
 
     async def handle_agent_status(self, status: str) -> None:
         await self._send_ios({"type": "agent_status", "status": status})
@@ -327,6 +337,83 @@ class AgentCallManager:
     def _normalize_transcript_for_dedupe(self, text: str) -> str:
         normalized = " ".join(text.strip().lower().split())
         normalized = re.sub(r"[^\w\s]", "", normalized)
+        return normalized
+
+    def _schedule_auto_end_after_farewell(self) -> None:
+        if self._ending:
+            return
+        if self._auto_end_task and not self._auto_end_task.done():
+            return
+
+        async def _auto_end_later() -> None:
+            await asyncio.sleep(AUTO_END_AFTER_FAREWELL_SECONDS)
+            if not self._ending:
+                await self.end_call()
+
+        logger.info("[%s] scheduling automatic call end after farewell", self.call_sid)
+        self._auto_end_task = asyncio.create_task(_auto_end_later())
+
+    def _should_auto_end_after_agent_turn(self, text: str) -> bool:
+        normalized = self._normalize_for_intent_detection(text)
+        if not normalized:
+            return False
+
+        if "?" in text:
+            return False
+
+        continuation_markers = (
+            "podria",
+            "puede ",
+            "pueden ",
+            "necesito ",
+            "falta",
+            "confirm",
+            "cuando",
+            "donde",
+            "como ",
+            "cual",
+            "cuanto",
+            "help you",
+            "can you",
+            "would you",
+            "please",
+        )
+        if any(marker in normalized for marker in continuation_markers):
+            return False
+
+        goodbye_markers = (
+            "adios",
+            "hasta luego",
+            "hasta pronto",
+            "me despido",
+            "goodbye",
+            "bye",
+            "have a good day",
+            "have a great day",
+            "au revoir",
+            "arrivederci",
+            "tschuss",
+            "tchau",
+        )
+        closing_markers = (
+            "eso es todo",
+            "con eso seria todo",
+            "no necesito nada mas",
+            "nada mas por ahora",
+            "quedamos asi",
+            "muchas gracias por su ayuda",
+            "gracias por su tiempo",
+        )
+
+        return any(marker in normalized for marker in goodbye_markers) or any(
+            marker in normalized for marker in closing_markers
+        )
+
+    def _normalize_for_intent_detection(self, text: str) -> str:
+        normalized = " ".join(text.strip().lower().split())
+        normalized = "".join(
+            ch for ch in unicodedata.normalize("NFKD", normalized) if not unicodedata.combining(ch)
+        )
         return normalized
 
 
