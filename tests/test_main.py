@@ -28,15 +28,22 @@ def test_create_call_creates_state_and_bridge(monkeypatch):
         return "CA123", "+12025550123"
 
     class DummyBridge:
-        def __init__(self, call_sid):
+        def __init__(self, call_sid, source_language, target_language):
             self.call_sid = call_sid
+            self.source_language = source_language
+            self.target_language = target_language
 
     monkeypatch.setattr(main, "initiate_outbound_call", fake_initiate_outbound_call)
     monkeypatch.setattr(main, "TranslationBridge", DummyBridge)
 
     resp = client.post(
         "/call",
-        json={"to": "+34999999999", "from": "+12025550123"},
+        json={
+            "to": "+34999999999",
+            "from": "+12025550123",
+            "source_language": "fr",
+            "target_language": "de-DE",
+        },
     )
     assert resp.status_code == 200
     assert resp.json() == {"call_sid": "CA123", "status": "initiating"}
@@ -45,13 +52,23 @@ def test_create_call_creates_state_and_bridge(monkeypatch):
     assert state is not None
     assert state.to_number == "+34999999999"
     assert state.from_number == "+12025550123"
+    assert state.source_language == "fr-FR"
+    assert state.target_language == "de-DE"
     assert isinstance(state.bridge, DummyBridge)
     assert state.bridge.call_sid == "CA123"
+    assert state.bridge.source_language == "fr-FR"
+    assert state.bridge.target_language == "de-DE"
 
 
 def test_get_call_status_uses_cached_state():
     client = TestClient(main.app)
-    state = main.call_manager.create_call("CA999", "+349999", "+1202")
+    state = main.call_manager.create_call(
+        "CA999",
+        "+349999",
+        "+1202",
+        source_language="en-US",
+        target_language="es-US",
+    )
     state.status = CallStatus.IN_PROGRESS
 
     resp = client.get("/call/CA999/status")
@@ -61,6 +78,8 @@ def test_get_call_status_uses_cached_state():
         "status": "in_progress",
         "to": "+349999",
         "from_": "+1202",
+        "source_language": "en-US",
+        "target_language": "es-US",
     }
 
 
@@ -85,7 +104,39 @@ def test_get_call_status_falls_back_to_twilio(monkeypatch):
         "status": "ringing",
         "to": "+349999",
         "from_": "+1202",
+        "source_language": "en-US",
+        "target_language": "es-US",
     }
+
+
+def test_create_call_rejects_unsupported_language(monkeypatch):
+    client = TestClient(main.app)
+
+    def fake_initiate_outbound_call(to_number, from_number=None):
+        return "CA123", "+12025550123"
+
+    monkeypatch.setattr(main, "initiate_outbound_call", fake_initiate_outbound_call)
+
+    resp = client.post(
+        "/call",
+        json={
+            "to": "+34999999999",
+            "source_language": "xx-YY",
+            "target_language": "es-US",
+        },
+    )
+    assert resp.status_code == 422
+    assert "Unsupported source_language" in resp.json()["detail"]
+
+
+def test_translation_languages_endpoint():
+    client = TestClient(main.app)
+    resp = client.get("/translation/languages")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["default_source_language"] == "en-US"
+    assert payload["default_target_language"] == "es-US"
+    assert any(item["code"] == "en-US" for item in payload["supported_languages"])
 
 
 def test_end_call_hangs_up_and_cleans(monkeypatch):

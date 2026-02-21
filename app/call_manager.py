@@ -14,6 +14,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Dict, Optional
 
 from fastapi import WebSocket
+from app.language_support import DEFAULT_SOURCE_LANGUAGE, DEFAULT_TARGET_LANGUAGE
 
 if TYPE_CHECKING:
     from app.translation_bridge import TranslationBridge
@@ -34,6 +35,8 @@ class CallState:
     call_sid: str
     to_number: str
     from_number: str
+    source_language: str = DEFAULT_SOURCE_LANGUAGE
+    target_language: str = DEFAULT_TARGET_LANGUAGE
     status: CallStatus = CallStatus.INITIATING
 
     # WebSocket handles
@@ -58,15 +61,29 @@ class CallManager:
     # ------------------------------------------------------------------
 
     def create_call(
-        self, call_sid: str, to_number: str, from_number: str
+        self,
+        call_sid: str,
+        to_number: str,
+        from_number: str,
+        source_language: str = DEFAULT_SOURCE_LANGUAGE,
+        target_language: str = DEFAULT_TARGET_LANGUAGE,
     ) -> CallState:
         state = CallState(
             call_sid=call_sid,
             to_number=to_number,
             from_number=from_number,
+            source_language=source_language,
+            target_language=target_language,
         )
         self._calls[call_sid] = state
-        logger.info("Call created: %s  %s → %s", call_sid, from_number, to_number)
+        logger.info(
+            "Call created: %s  %s → %s  (%s→%s)",
+            call_sid,
+            from_number,
+            to_number,
+            source_language,
+            target_language,
+        )
         return state
 
     def get_call(self, call_sid: str) -> Optional[CallState]:

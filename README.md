@@ -1,6 +1,6 @@
 # Habla — Real-Time Phone Call Translation
 
-Habla lets an English speaker make phone calls to Spanish phone numbers (schools, businesses, delivery services, etc.) with real-time bidirectional speech translation powered by **Amazon Nova 2 Sonic**.
+Habla lets a caller speak in one language and call someone who speaks another language, with real-time bidirectional speech translation powered by **Amazon Nova 2 Sonic**.
 
 Built for the **Amazon Nova AI Hackathon**.
 
@@ -8,16 +8,29 @@ Built for the **Amazon Nova AI Hackathon**.
 
 ```
 ┌─────────────┐     WebSocket      ┌──────────────────┐    Twilio Media     ┌─────────┐     PSTN Call      ┌──────────────┐
-│   iOS App   │◄──────────────────►│  Python Backend   │◄───Streams (WS)───►│ Twilio  │◄────────────────►│ Spanish Phone │
-│ (English    │   (PCM 16kHz)      │                   │   (mulaw 8kHz)     │  Voice  │    (regular       │  (school,     │
-│  speaker)   │                    │  Two Nova 2 Sonic │                    │   API   │     phone call)   │   business)   │
+│   iOS App   │◄──────────────────►│  Python Backend   │◄───Streams (WS)───►│ Twilio  │◄────────────────►│  Phone Callee │
+│ (Source     │   (PCM 16kHz)      │                   │   (mulaw 8kHz)     │  Voice  │    (regular       │ (target-lang  │
+│  language)  │                    │  Two Nova 2 Sonic │                    │   API   │     phone call)   │   speaker)    │
 │             │                    │  sessions running │                    │         │                   │               │
 └─────────────┘                    └──────────────────┘                    └─────────┘                   └──────────────┘
 ```
 
 **Two Nova 2 Sonic sessions run per call:**
-- **Session A (EN→ES):** iOS mic → Nova translates → Spanish audio to phone speaker
-- **Session B (ES→EN):** Phone mic → Nova translates → English audio to iOS speaker
+- **Session A (source→target):** iOS mic → Nova translates → target-language audio to phone speaker
+- **Session B (target→source):** Phone mic → Nova translates → source-language audio to iOS speaker
+
+### Supported Translation Languages (Nova 2 Sonic)
+
+- `en-US` (English - US)
+- `en-GB` (English - UK)
+- `en-AU` (English - Australia)
+- `en-IN` (English - India)
+- `es-US` (Spanish - US)
+- `fr-FR` (French - France)
+- `de-DE` (German - Germany)
+- `it-IT` (Italian - Italy)
+- `pt-BR` (Portuguese - Brazil)
+- `hi-IN` (Hindi - India)
 
 ## Quick Start
 
@@ -60,7 +73,11 @@ ngrok http 8000
 # Initiate a translated call
 curl -X POST http://localhost:8000/call \
   -H "Content-Type: application/json" \
-  -d '{"to": "+34612345678"}'
+  -d '{
+    "to": "+34612345678",
+    "source_language": "en-US",
+    "target_language": "es-US"
+  }'
 
 # Returns: {"call_sid": "CA...", "status": "initiating"}
 ```
@@ -71,12 +88,24 @@ Then connect the iOS app WebSocket to `ws://localhost:8000/ws/{call_sid}` and st
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/translation/languages` | List supported Nova translation languages |
 | `POST` | `/call` | Initiate an outbound translated call |
 | `POST` | `/call/{sid}/end` | End an active call |
 | `GET` | `/call/{sid}/status` | Get call status |
 | `POST` | `/twilio/webhook` | Twilio webhook (returns TwiML) |
 | `WS` | `/ws/{call_sid}` | iOS app audio WebSocket (binary PCM 16kHz) |
 | `WS` | `/twilio/media-stream` | Twilio Media Streams WebSocket |
+
+`POST /call` request body:
+
+```json
+{
+  "to": "+12025550123",
+  "from": "+12025550199",
+  "source_language": "en-US",
+  "target_language": "de-DE"
+}
+```
 
 ## Docker
 
