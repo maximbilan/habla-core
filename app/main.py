@@ -126,6 +126,13 @@ async def _extract_twilio_call_sid(request: Request, fallback_call_sid: str) -> 
     return str(call_sid) if call_sid else fallback_call_sid
 
 
+def _should_process_agent_media_track(track: str | None) -> bool:
+    if not track:
+        return True
+    normalized = track.strip().lower()
+    return normalized not in {"outbound", "outbound_track"}
+
+
 # ===================================================================
 # REST endpoints
 # ===================================================================
@@ -462,6 +469,9 @@ async def agent_twilio_media_stream(ws: WebSocket, call_sid: str):
                 await manager.on_twilio_start(ws, stream_sid)
 
             elif event_type == "media" and manager:
+                track = data.get("media", {}).get("track")
+                if not _should_process_agent_media_track(track):
+                    continue
                 payload = data.get("media", {}).get("payload")
                 if payload:
                     await manager.handle_twilio_media(payload)
