@@ -1,4 +1,4 @@
-"""Transcript storage and Spanish->English translation for Agent Mode."""
+"""Transcript storage and call-language->English translation for Agent Mode."""
 
 from __future__ import annotations
 
@@ -32,9 +32,14 @@ class TranscriptEntry:
 class TranscriptService:
     """Accumulates transcript entries and translates chunks to English."""
 
-    def __init__(self, region: str = AWS_REGION) -> None:
+    def __init__(
+        self,
+        region: str = AWS_REGION,
+        source_language_label: str = "the call language",
+    ) -> None:
         self.entries: list[TranscriptEntry] = []
         self._region = region
+        self._source_language_label = source_language_label
         self._bedrock: BedrockRuntimeClient | None = None
 
     def _client(self) -> BedrockRuntimeClient:
@@ -58,12 +63,12 @@ class TranscriptService:
         self.entries.append(entry)
         return entry
 
-    async def translate_to_english(self, spanish_text: str) -> str:
-        """Translate Spanish transcript chunks with Nova 2 Lite."""
+    async def translate_to_english(self, source_text: str) -> str:
+        """Translate transcript chunks to English with Nova 2 Lite."""
         prompt = (
-            "Translate the following Spanish text to English. "
+            f"Translate the following text from {self._source_language_label} to English. "
             "Return only the translation, nothing else.\n\n"
-            f"{spanish_text}"
+            f"{source_text}"
         )
 
         body = {
@@ -87,7 +92,7 @@ class TranscriptService:
 
         raw = json.loads(response.body.decode("utf-8"))
         text = self._extract_text(raw).strip()
-        return text or spanish_text
+        return text or source_text
 
     def _extract_text(self, payload: dict) -> str:
         # Nova schemas can vary across model families; keep parsing defensive.

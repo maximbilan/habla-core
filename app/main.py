@@ -30,6 +30,7 @@ from app.translation_bridge import TranslationBridge
 from app.language_support import (
     DEFAULT_SOURCE_LANGUAGE,
     DEFAULT_TARGET_LANGUAGE,
+    resolve_supported_language,
     resolve_translation_languages,
     supported_languages_payload,
 )
@@ -68,7 +69,7 @@ class AgentCallRequest(BaseModel):
     from_: str | None = Field(default=None, alias="from")
     prompt: str
     user_name: str = "Caller"
-    language: str = "es"
+    language: str = DEFAULT_TARGET_LANGUAGE
 
     model_config = {"populate_by_name": True}
 
@@ -241,6 +242,10 @@ async def twilio_webhook(request: Request):
 
 @app.post("/agent/call", response_model=AgentCallResponse)
 async def create_agent_call(req: AgentCallRequest):
+    language = resolve_supported_language(req.language)
+    if not language:
+        raise HTTPException(status_code=422, detail=f"Unsupported language '{req.language}'")
+
     try:
         call_sid, caller_id = initiate_agent_outbound_call(req.to, req.from_)
     except HTTPException:
@@ -256,7 +261,7 @@ async def create_agent_call(req: AgentCallRequest):
             from_number=caller_id,
             prompt=req.prompt,
             user_name=req.user_name,
-            language=req.language,
+            language=language.code,
         ),
     )
     return AgentCallResponse(call_sid=call_sid, status="initiating")

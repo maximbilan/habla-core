@@ -13,9 +13,15 @@ from app.agent.prompts import build_agent_prompt
 from app.agent.transcript import TranscriptService
 from app.config import (
     PUBLIC_URL,
+    NOVA_VOICE_ID_EN,
     NOVA_VOICE_ID_ES,
 )
 from app.caller_id.service import create_outbound_call, get_twilio_client
+from app.language_support import (
+    DEFAULT_TARGET_LANGUAGE,
+    default_voice_id_for_language,
+    resolve_supported_language,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +35,7 @@ class AgentCallConfig:
     from_number: str | None
     prompt: str
     user_name: str
-    language: str = "es"
+    language: str = DEFAULT_TARGET_LANGUAGE
 
 
 class AgentCallManager:
@@ -40,10 +46,19 @@ class AgentCallManager:
         self.config = config
         self.status = "initiating"
 
+        resolved_language = resolve_supported_language(config.language)
+        if not resolved_language:
+            resolved_language = resolve_supported_language(DEFAULT_TARGET_LANGUAGE)
+        if not resolved_language:
+            raise ValueError(
+                f"Unsupported agent language '{config.language}' and invalid default '{DEFAULT_TARGET_LANGUAGE}'"
+            )
+        self._callee_language = resolved_language
+
         self.nova_session: AgentNovaSession | None = None
         self.ios_websocket: WebSocket | None = None
         self.bridge = AgentBridge(call_sid)
-        self.transcript = TranscriptService()
+        self.transcript = TranscriptService(source_language_label=self._callee_language.label)
 
         self._ending = False
         self._end_lock = asyncio.Lock()
@@ -94,12 +109,17 @@ class AgentCallManager:
             await self.ensure_nova_session()
 
     async def start_nova_session(self) -> None:
-        system_prompt = build_agent_prompt(self.config.prompt, self.config.user_name)
+        system_prompt = build_agent_prompt(
+            self.config.prompt,
+            self.config.user_name,
+            callee_language_code=self._callee_language.code,
+            callee_language_label=self._callee_language.label,
+        )
 
         self.nova_session = AgentNovaSession(
             session_id=f"agent-{self.call_sid}",
             system_prompt=system_prompt,
-            voice_id=NOVA_VOICE_ID_ES,
+            voice_id=self._voice_id_for_language(self._callee_language.code),
             on_audio_output=self.handle_nova_audio,
             on_transcript=self.handle_transcript,
             on_agent_status=self.handle_agent_status,
@@ -110,7 +130,7 @@ class AgentCallManager:
         # after session restarts.
         if not self._opening_instruction_sent:
             await self.nova_session.inject_instruction(
-                "La llamada se ha conectado. Preséntese y comience la conversación ahora."
+                "The call is connected. Start with a brief and natural greeting, explain the reason for the call in one short sentence, then pause and wait for a response."
             )
             self._opening_instruction_sent = True
 
@@ -200,7 +220,9 @@ class AgentCallManager:
             await self.nova_session.inject_instruction(instruction.strip())
 
     async def end_conversation(self, farewell_instruction: str) -> None:
-        await self.inject_instruction(farewell_instruction or "Despídase con cortesía y cierre la llamada.")
+        await self.inject_instruction(
+            farewell_instruction or "Politely say goodbye and end the call."
+        )
 
         async def _finish_later() -> None:
             await asyncio.sleep(2.5)
@@ -235,6 +257,13 @@ class AgentCallManager:
             await self.ios_websocket.send_json(payload)
         except Exception:
             self.ios_websocket = None
+
+    def _voice_id_for_language(self, language_code: str) -> str:
+        if language_code == "en-US":
+            return NOVA_VOICE_ID_EN
+        if language_code == "es-US":
+            return NOVA_VOICE_ID_ES
+        return default_voice_id_for_language(language_code)
 
 
 class AgentCallRegistry:

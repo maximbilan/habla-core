@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class AgentNovaSession:
-    """Manages one bidirectional Nova stream for autonomous Spanish calls."""
+    """Manages one bidirectional Nova stream for autonomous agent calls."""
 
     def __init__(
         self,
@@ -102,9 +102,9 @@ class AgentNovaSession:
                 "event": {
                     "sessionStart": {
                         "inferenceConfiguration": {
-                            "maxTokens": 1024,
-                            "topP": 0.9,
-                            "temperature": 0.6,
+                            "maxTokens": 768,
+                            "topP": 0.95,
+                            "temperature": 0.7,
                         },
                         "turnDetectionConfiguration": {
                             "endpointingSensitivity": "LOW",
@@ -239,7 +239,7 @@ class AgentNovaSession:
                 "textInput": {
                     "promptName": self.prompt_name,
                     "contentName": content_name,
-                    "content": f"[New instruction from the caller]: {instruction_text}",
+                    "content": f"[Additional instruction from caller]: {instruction_text}",
                 }
             }
         }
