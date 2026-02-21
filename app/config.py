@@ -38,4 +38,3 @@ NOVA_VOICE_ID_ES = os.getenv("NOVA_VOICE_ID_ES", "lupe")
 # Audio constants
 INPUT_SAMPLE_RATE = 16000   # PCM input to Nova
 OUTPUT_SAMPLE_RATE = 24000  # PCM output from Nova
-TWILIO_SAMPLE_RATE = 8000   # Twilio mulaw sample rate

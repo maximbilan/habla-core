@@ -24,10 +24,8 @@ logger = logging.getLogger(__name__)
 
 class CallStatus(str, Enum):
     INITIATING = "initiating"
-    RINGING = "ringing"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
-    FAILED = "failed"
 
 
 @dataclass
@@ -88,9 +86,6 @@ class CallManager:
 
     def get_call(self, call_sid: str) -> Optional[CallState]:
         return self._calls.get(call_sid)
-
-    def list_active(self) -> list[CallState]:
-        return [c for c in self._calls.values() if c.status != CallStatus.COMPLETED]
 
     # ------------------------------------------------------------------
     # Cleanup
