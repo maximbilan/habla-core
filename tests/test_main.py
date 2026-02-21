@@ -176,6 +176,13 @@ def test_extract_twilio_call_sid_falls_back_when_form_unavailable():
     assert sid == "pending"
 
 
+def test_should_process_agent_media_track():
+    assert main._should_process_agent_media_track(None) is True
+    assert main._should_process_agent_media_track("inbound") is True
+    assert main._should_process_agent_media_track("outbound") is False
+    assert main._should_process_agent_media_track("outbound_track") is False
+
+
 def test_end_call_hangs_up_and_cleans(monkeypatch):
     client = TestClient(main.app)
     main.call_manager.create_call("CA888", "+349999", "+1202")

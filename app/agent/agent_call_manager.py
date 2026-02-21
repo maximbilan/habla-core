@@ -47,8 +47,10 @@ class AgentCallManager:
 
         self._ending = False
         self._end_lock = asyncio.Lock()
+        self._nova_start_lock = asyncio.Lock()
         self._nova_restart_attempts = 0
         self._last_nova_start_monotonic = 0.0
+        self._opening_instruction_sent = False
 
     def status_payload(self) -> dict:
         return {
@@ -104,46 +106,50 @@ class AgentCallManager:
         )
         await self.nova_session.start()
 
-        # Kick off the conversation once the callee is connected.
-        await self.nova_session.inject_instruction(
-            "La llamada se ha conectado. Preséntese y comience la conversación ahora."
-        )
+        # Kick off the conversation only once per call to avoid repeated monologues
+        # after session restarts.
+        if not self._opening_instruction_sent:
+            await self.nova_session.inject_instruction(
+                "La llamada se ha conectado. Preséntese y comience la conversación ahora."
+            )
+            self._opening_instruction_sent = True
 
     async def ensure_nova_session(self) -> bool:
-        if self.nova_session and self.nova_session.is_active:
-            return True
+        async with self._nova_start_lock:
+            if self.nova_session and self.nova_session.is_active:
+                return True
 
-        loop = asyncio.get_running_loop()
-        now = loop.time()
+            loop = asyncio.get_running_loop()
+            now = loop.time()
 
-        if self._nova_restart_attempts >= MAX_NOVA_RESTART_ATTEMPTS:
-            logger.error(
-                "[%s] Nova session restart limit reached (%d attempts)",
-                self.call_sid,
-                self._nova_restart_attempts,
-            )
-            self.status = "failed"
-            await self._send_ios({"type": "status", "status": "failed"})
-            return False
+            if self._nova_restart_attempts >= MAX_NOVA_RESTART_ATTEMPTS:
+                logger.error(
+                    "[%s] Nova session restart limit reached (%d attempts)",
+                    self.call_sid,
+                    self._nova_restart_attempts,
+                )
+                self.status = "failed"
+                await self._send_ios({"type": "status", "status": "failed"})
+                return False
 
-        # Prevent a tight restart loop when Nova fails immediately.
-        if (
-            self._last_nova_start_monotonic > 0
-            and now - self._last_nova_start_monotonic < MIN_NOVA_RESTART_INTERVAL_SECONDS
-        ):
-            return False
+            # Prevent a tight restart loop when Nova fails immediately.
+            if (
+                self._last_nova_start_monotonic > 0
+                and now - self._last_nova_start_monotonic < MIN_NOVA_RESTART_INTERVAL_SECONDS
+            ):
+                return False
 
-        self._nova_restart_attempts += 1
-        self._last_nova_start_monotonic = now
+            self._nova_restart_attempts += 1
+            self._last_nova_start_monotonic = now
 
-        try:
-            await self.start_nova_session()
-            return True
-        except Exception as exc:
-            logger.error("[%s] failed to start/restart Nova session: %s", self.call_sid, exc)
-            self.status = "failed"
-            await self._send_ios({"type": "status", "status": "failed"})
-            return False
+            try:
+                await self.start_nova_session()
+                return True
+            except Exception as exc:
+                logger.error("[%s] failed to start/restart Nova session: %s", self.call_sid, exc)
+                self.status = "failed"
+                await self._send_ios({"type": "status", "status": "failed"})
+                return False
 
     async def handle_twilio_media(self, payload: str) -> None:
         if not await self.ensure_nova_session():
