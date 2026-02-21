@@ -107,7 +107,7 @@ class AgentNovaSession:
                             "temperature": 0.6,
                         },
                         "turnDetectionConfiguration": {
-                            "endpointingSensitivity": "MEDIUM",
+                            "endpointingSensitivity": "LOW",
                         },
                     }
                 }
