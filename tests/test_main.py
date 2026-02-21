@@ -3,7 +3,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main
+from app import request_auth
 from app.call_manager import CallStatus
+from app.request_auth import _expected_token, auth_enabled
 
 
 @pytest.fixture(autouse=True)
@@ -13,11 +15,27 @@ def _clear_calls():
     main.call_manager._calls.clear()
 
 
+def _auth_headers() -> dict[str, str]:
+    if not auth_enabled():
+        return {}
+    return {"Authorization": _expected_token()}
+
+
 def test_health():
     client = TestClient(main.app)
     resp = client.get("/")
     assert resp.status_code == 200
     assert resp.json() == {"service": "habla", "status": "running"}
+
+
+def test_protected_route_rejects_missing_auth_when_enabled(monkeypatch):
+    client = TestClient(main.app)
+    monkeypatch.setattr(request_auth, "HABLA_SECRET", "test-secret")
+    monkeypatch.setattr(request_auth, "HABLA_APP_BUNDLE_ID", "com.maximbilan.habla-ios")
+    request_auth._expected_token.cache_clear()
+
+    resp = client.get("/translation/languages")
+    assert resp.status_code == 401
 
 
 def test_create_call_creates_state_and_bridge(monkeypatch):
@@ -45,6 +63,7 @@ def test_create_call_creates_state_and_bridge(monkeypatch):
             "source_language": "fr",
             "target_language": "de-DE",
         },
+        headers=_auth_headers(),
     )
     assert resp.status_code == 200
     assert resp.json() == {"call_sid": "CA123", "status": "initiating"}
@@ -72,7 +91,7 @@ def test_get_call_status_uses_cached_state():
     )
     state.status = CallStatus.IN_PROGRESS
 
-    resp = client.get("/call/CA999/status")
+    resp = client.get("/call/CA999/status", headers=_auth_headers())
     assert resp.status_code == 200
     assert resp.json() == {
         "call_sid": "CA999",
@@ -98,7 +117,7 @@ def test_get_call_status_falls_back_to_twilio(monkeypatch):
 
     monkeypatch.setattr(main, "fetch_call_status", fake_fetch_call_status)
 
-    resp = client.get("/call/CA404/status")
+    resp = client.get("/call/CA404/status", headers=_auth_headers())
     assert resp.status_code == 200
     assert resp.json() == {
         "call_sid": "CA404",
@@ -125,6 +144,7 @@ def test_create_call_rejects_unsupported_language(monkeypatch):
             "source_language": "xx-YY",
             "target_language": "es-US",
         },
+        headers=_auth_headers(),
     )
     assert resp.status_code == 422
     assert "Unsupported source_language" in resp.json()["detail"]
@@ -132,7 +152,7 @@ def test_create_call_rejects_unsupported_language(monkeypatch):
 
 def test_translation_languages_endpoint():
     client = TestClient(main.app)
-    resp = client.get("/translation/languages")
+    resp = client.get("/translation/languages", headers=_auth_headers())
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["default_source_language"] == "en-US"
@@ -194,7 +214,7 @@ def test_end_call_hangs_up_and_cleans(monkeypatch):
 
     monkeypatch.setattr(main, "hangup_call", fake_hangup)
 
-    resp = client.post("/call/CA888/end")
+    resp = client.post("/call/CA888/end", headers=_auth_headers())
     assert resp.status_code == 200
     assert resp.json() == {"call_sid": "CA888", "status": "completed"}
     assert hung_up["called"] is True

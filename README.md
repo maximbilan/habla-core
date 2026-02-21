@@ -54,6 +54,7 @@ pip install -r requirements.txt
 # Configure environment
 cp .env.example .env
 # Edit .env with your AWS and Twilio credentials
+# Optional but recommended: set HABLA_SECRET to enable request auth
 ```
 
 ### Run
@@ -71,7 +72,9 @@ ngrok http 8000
 
 ```bash
 # Initiate a translated call
+TOKEN=$(python3 -c "import hmac, hashlib; print(hmac.new(b'$HABLA_SECRET', b'com.maximbilan.habla-ios', hashlib.sha256).hexdigest())")
 curl -X POST http://localhost:8000/call \
+  -H "Authorization: $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "to": "+34612345678",
@@ -95,6 +98,12 @@ Then connect the iOS app WebSocket to `ws://localhost:8000/ws/{call_sid}` and st
 | `POST` | `/twilio/webhook` | Twilio webhook (returns TwiML) |
 | `WS` | `/ws/{call_sid}` | iOS app audio WebSocket (binary PCM 16kHz) |
 | `WS` | `/twilio/media-stream` | Twilio Media Streams WebSocket |
+
+When `HABLA_SECRET` is configured, iOS-facing REST routes and iOS WebSocket routes require `Authorization` with a token computed as:
+
+`HMAC-SHA256(HABLA_SECRET, HABLA_APP_BUNDLE_ID)`
+
+Twilio webhook/media endpoints are intentionally excluded from this auth.
 
 `POST /call` request body:
 
