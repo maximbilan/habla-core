@@ -112,7 +112,7 @@ class CallManager:
                     logger.error("Bridge close error for %s: %s", call_sid, e)
 
             # 2. close WebSockets
-            for label, ws in [("iOS", state.ios_ws), ("Twilio", state.twilio_ws)]:
+            for ws in (state.ios_ws, state.twilio_ws):
                 if ws:
                     try:
                         await ws.close()

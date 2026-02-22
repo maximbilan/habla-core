@@ -56,7 +56,6 @@ class AgentNovaSession:
         self._bedrock: BedrockRuntimeClient | None = None
         self.stream = None
         self.is_active = False
-        self._died_unexpectedly = False
 
         self.prompt_name = str(uuid.uuid4())
         self.content_name = str(uuid.uuid4())
@@ -274,7 +273,6 @@ class AgentNovaSession:
         except Exception as exc:
             if self.is_active:
                 logger.error("Agent Nova response loop error [%s]: %s", self.session_id, exc)
-                self._died_unexpectedly = True
                 self.is_active = False
         finally:
             logger.info("Agent Nova response loop ended [%s]", self.session_id)

@@ -198,3 +198,39 @@ def test_handle_twilio_media_forwards_payloads():
         "repeat_guard_triggers",
         "listen_first_guidance",
     }
+
+
+def test_is_control_transcript_payload_detection():
+    manager = AgentCallManager(
+        call_sid="CA_CTRL",
+        config=AgentCallConfig(
+            to_number="+12025550100",
+            from_number=None,
+            prompt="Test",
+            user_name="Tester",
+            language="es",
+        ),
+    )
+
+    assert manager._is_control_transcript_payload("[Additional instruction from caller]: short update")
+    assert manager._is_control_transcript_payload('{"type":"status","reason":"done"}')
+    assert manager._is_control_transcript_payload('{"event":"interrupt","ok":true}')
+    assert not manager._is_control_transcript_payload("Necesito confirmar una cita.")
+    assert not manager._is_control_transcript_payload('{"message":"normal content","count":5,"other":"x","extra":"y"}')
+
+
+def test_should_auto_end_after_agent_turn_detects_closing_phrases():
+    manager = AgentCallManager(
+        call_sid="CA_END",
+        config=AgentCallConfig(
+            to_number="+12025550100",
+            from_number=None,
+            prompt="Test",
+            user_name="Tester",
+            language="es",
+        ),
+    )
+
+    assert manager._should_auto_end_after_agent_turn("Muchas gracias por su tiempo, adios.")
+    assert not manager._should_auto_end_after_agent_turn("¿Puede confirmar la dirección?")
+    assert not manager._should_auto_end_after_agent_turn("Necesito confirmar un detalle más.")

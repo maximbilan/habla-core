@@ -11,8 +11,10 @@ from app.request_auth import _expected_token, auth_enabled
 @pytest.fixture(autouse=True)
 def _clear_calls():
     main.call_manager._calls.clear()
+    main.agent_calls._calls.clear()
     yield
     main.call_manager._calls.clear()
+    main.agent_calls._calls.clear()
 
 
 def _auth_headers() -> dict[str, str]:
@@ -219,3 +221,121 @@ def test_end_call_hangs_up_and_cleans(monkeypatch):
     assert resp.json() == {"call_sid": "CA888", "status": "completed"}
     assert hung_up["called"] is True
     assert main.call_manager.get_call("CA888") is None
+
+
+def test_create_agent_call_creates_state(monkeypatch):
+    client = TestClient(main.app)
+
+    def fake_initiate_agent_outbound_call(to_number, from_number=None):
+        assert to_number == "+34999999999"
+        assert from_number == "+12025550123"
+        return "CA_AGENT_1", "+12025550123"
+
+    monkeypatch.setattr(main, "initiate_agent_outbound_call", fake_initiate_agent_outbound_call)
+
+    resp = client.post(
+        "/agent/call",
+        json={
+            "to": "+34999999999",
+            "from": "+12025550123",
+            "prompt": "Confirm an appointment for tomorrow.",
+            "user_name": "Max",
+            "language": "es",
+        },
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"call_sid": "CA_AGENT_1", "status": "initiating"}
+
+    manager = main.agent_calls.get("CA_AGENT_1")
+    assert manager is not None
+    assert manager.config.to_number == "+34999999999"
+    assert manager.config.from_number == "+12025550123"
+    assert manager.config.prompt == "Confirm an appointment for tomorrow."
+    assert manager.config.user_name == "Max"
+    assert manager.config.language == "es-US"
+
+
+def test_create_agent_call_rejects_unsupported_language():
+    client = TestClient(main.app)
+    resp = client.post(
+        "/agent/call",
+        json={
+            "to": "+34999999999",
+            "prompt": "Test prompt",
+            "language": "xx-YY",
+        },
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 422
+    assert "Unsupported language" in resp.json()["detail"]
+
+
+def test_get_agent_call_status_returns_payload(monkeypatch):
+    client = TestClient(main.app)
+
+    class DummyManager:
+        def status_payload(self):
+            return {
+                "call_sid": "CA_AGENT_STATUS",
+                "status": "connected",
+                "transcript": [],
+                "quality_metrics": {},
+            }
+
+    monkeypatch.setattr(main.agent_calls, "get", lambda _: DummyManager())
+
+    resp = client.get("/agent/call/CA_AGENT_STATUS/status", headers=_auth_headers())
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "call_sid": "CA_AGENT_STATUS",
+        "status": "connected",
+        "transcript": [],
+        "quality_metrics": {},
+    }
+
+
+def test_end_agent_call_not_found():
+    client = TestClient(main.app)
+    resp = client.post("/agent/call/CA_UNKNOWN/end", headers=_auth_headers())
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Agent call not found"
+
+
+def test_end_agent_call_invokes_manager(monkeypatch):
+    client = TestClient(main.app)
+
+    class DummyManager:
+        def __init__(self):
+            self.called = False
+
+        async def end_call(self):
+            self.called = True
+
+    manager = DummyManager()
+    monkeypatch.setattr(main.agent_calls, "get", lambda _: manager)
+
+    resp = client.post("/agent/call/CA_AGENT_END/end", headers=_auth_headers())
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ended"}
+    assert manager.called is True
+
+
+def test_agent_twilio_webhook_uses_call_sid_from_form():
+    client = TestClient(main.app)
+    resp = client.post(
+        "/agent/twilio/webhook/pending",
+        data={"CallSid": "CA_FROM_TWILIO"},
+    )
+    assert resp.status_code == 200
+    assert "/agent/twilio/media-stream/CA_FROM_TWILIO" in resp.text
+
+
+def test_agent_twilio_webhook_uses_fallback_sid_when_form_missing_callsid():
+    client = TestClient(main.app)
+    resp = client.post(
+        "/agent/twilio/webhook/CA_FALLBACK",
+        data={"Foo": "bar"},
+    )
+    assert resp.status_code == 200
+    assert "/agent/twilio/media-stream/CA_FALLBACK" in resp.text
