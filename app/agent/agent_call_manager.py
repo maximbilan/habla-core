@@ -38,6 +38,7 @@ RUNTIME_COACHING_COOLDOWN_SECONDS = 0.75
 MAX_RECENT_AGENT_TURNS = 6
 AGENT_REPETITION_WINDOW = 4
 AGENT_REPETITION_SIMILARITY_THRESHOLD = 0.84
+ENABLE_AGENT_BARGE_IN_CLEAR = False
 
 
 @dataclass
@@ -204,7 +205,13 @@ class AgentCallManager:
         if not await self.ensure_nova_session():
             return
 
-        if self._agent_status == "speaking" and self._should_trigger_barge_in_clear():
+        # Twilio "clear" can clip agent speech if fired aggressively on inbound media.
+        # Keep this disabled by default until we add robust speech activity gating.
+        if (
+            ENABLE_AGENT_BARGE_IN_CLEAR
+            and self._agent_status == "speaking"
+            and self._should_trigger_barge_in_clear()
+        ):
             await self.bridge.clear_twilio_audio()
             self._quality_metrics["barge_in_interruptions"] += 1
             await self._inject_runtime_instruction(

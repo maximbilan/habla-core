@@ -170,7 +170,7 @@ def test_handle_transcript_triggers_repetition_guard():
     assert manager.status_payload()["quality_metrics"]["repeat_guard_triggers"] == 1
 
 
-def test_handle_twilio_media_barge_in_clears_audio_with_cooldown():
+def test_handle_twilio_media_barge_in_clear_is_disabled_by_default():
     manager = AgentCallManager(
         call_sid="CA_BARGE",
         config=AgentCallConfig(
@@ -195,6 +195,6 @@ def test_handle_twilio_media_barge_in_clears_audio_with_cooldown():
     asyncio.run(_run())
 
     assert bridge.forwarded_payloads == ["first", "second"]
-    assert bridge.clear_calls == 1
-    assert any("callee started speaking" in instruction for instruction in session.instructions)
-    assert manager.status_payload()["quality_metrics"]["barge_in_interruptions"] == 1
+    assert bridge.clear_calls == 0
+    assert not any("callee started speaking" in instruction for instruction in session.instructions)
+    assert manager.status_payload()["quality_metrics"]["barge_in_interruptions"] == 0
