@@ -32,6 +32,12 @@ MAX_NOVA_RESTART_ATTEMPTS = 5
 MIN_NOVA_RESTART_INTERVAL_SECONDS = 1.5
 TRANSCRIPT_DUPLICATE_SUPPRESSION_SECONDS = 20.0
 AUTO_END_AFTER_FAREWELL_SECONDS = 5.0
+BARGE_IN_CLEAR_COOLDOWN_SECONDS = 1.0
+LISTEN_FIRST_GUIDANCE_MIN_INTERVAL_SECONDS = 1.2
+RUNTIME_COACHING_COOLDOWN_SECONDS = 0.75
+MAX_RECENT_AGENT_TURNS = 6
+AGENT_REPETITION_WINDOW = 4
+AGENT_REPETITION_SIMILARITY_THRESHOLD = 0.84
 
 
 @dataclass
@@ -74,6 +80,20 @@ class AgentCallManager:
         self._recent_transcript_emit_monotonic: dict[str, float] = {}
         self._auto_end_task: asyncio.Task | None = None
         self._has_callee_uttered = False
+        self._agent_status = "idle"
+        self._last_barge_in_clear_monotonic = 0.0
+        self._last_runtime_coaching_monotonic = 0.0
+        self._last_listen_guidance_monotonic = 0.0
+        self._last_callee_transcript_normalized = ""
+        self._recent_agent_turns_normalized: list[str] = []
+        self._quality_metrics: dict[str, int | float] = {
+            "callee_turns": 0,
+            "agent_turns": 0,
+            "agent_words": 0,
+            "repeat_guard_triggers": 0,
+            "listen_first_guidance": 0,
+            "barge_in_interruptions": 0,
+        }
 
     def status_payload(self) -> dict:
         return {
@@ -88,6 +108,7 @@ class AgentCallManager:
                 }
                 for e in self.transcript.entries
             ],
+            "quality_metrics": self._quality_metrics_payload(),
         }
 
     async def attach_ios_websocket(self, ws: WebSocket) -> None:
@@ -138,7 +159,7 @@ class AgentCallManager:
         # after session restarts.
         if not self._opening_instruction_sent:
             await self.nova_session.inject_instruction(
-                "The call is connected. Start with a brief greeting and the specific request from the user. You are asking for help from the callee, so do not ask 'How can I help you?'. After the request, pause and wait for a response."
+                "The call is connected. Start with a brief greeting and the specific request from the user. Keep it to one concise turn, ask at most one focused question, then pause and wait for the callee. Do not ask 'How can I help you?'."
             )
             self._opening_instruction_sent = True
 
@@ -182,6 +203,15 @@ class AgentCallManager:
     async def handle_twilio_media(self, payload: str) -> None:
         if not await self.ensure_nova_session():
             return
+
+        if self._agent_status == "speaking" and self._should_trigger_barge_in_clear():
+            await self.bridge.clear_twilio_audio()
+            self._quality_metrics["barge_in_interruptions"] += 1
+            await self._inject_runtime_instruction(
+                "The callee started speaking. Stop talking immediately, listen, and in the next turn respond briefly to what they said.",
+                force=True,
+            )
+
         await self.bridge.forward_twilio_media_to_nova(payload, self.nova_session.send_audio)
 
     async def handle_nova_audio(self, audio_data: bytes) -> None:
@@ -204,6 +234,19 @@ class AgentCallManager:
             return
 
         entry = self.transcript.add_entry(role, text)
+
+        if role == "callee":
+            self._quality_metrics["callee_turns"] += 1
+            await self._maybe_inject_listen_first_guidance(text)
+        elif role == "agent":
+            self._quality_metrics["agent_turns"] += 1
+            self._quality_metrics["agent_words"] += self._word_count(text)
+            if self._is_repetitive_agent_turn(text):
+                self._quality_metrics["repeat_guard_triggers"] += 1
+                await self._inject_runtime_instruction(
+                    "You are repeating prior phrasing. Rephrase naturally in one short sentence, acknowledge the callee's latest point, and ask at most one focused follow-up question.",
+                    force=True,
+                )
 
         await self._send_ios(
             {
@@ -237,6 +280,7 @@ class AgentCallManager:
             self._schedule_auto_end_after_farewell()
 
     async def handle_agent_status(self, status: str) -> None:
+        self._agent_status = status
         await self._send_ios({"type": "agent_status", "status": status})
 
     async def inject_instruction(self, instruction: str) -> None:
@@ -290,6 +334,128 @@ class AgentCallManager:
         if language_code == "es-US":
             return NOVA_VOICE_ID_ES
         return default_voice_id_for_language(language_code)
+
+    def _quality_metrics_payload(self) -> dict[str, int | float]:
+        agent_turns = int(self._quality_metrics.get("agent_turns", 0))
+        agent_words = int(self._quality_metrics.get("agent_words", 0))
+        avg_words = (agent_words / agent_turns) if agent_turns else 0.0
+
+        return {
+            "callee_turns": int(self._quality_metrics.get("callee_turns", 0)),
+            "agent_turns": agent_turns,
+            "avg_agent_words_per_turn": round(avg_words, 2),
+            "repeat_guard_triggers": int(self._quality_metrics.get("repeat_guard_triggers", 0)),
+            "listen_first_guidance": int(self._quality_metrics.get("listen_first_guidance", 0)),
+            "barge_in_interruptions": int(self._quality_metrics.get("barge_in_interruptions", 0)),
+        }
+
+    async def _maybe_inject_listen_first_guidance(self, callee_text: str) -> None:
+        normalized = self._normalize_transcript_for_dedupe(callee_text)
+        if not normalized:
+            return
+
+        now = asyncio.get_running_loop().time()
+        if (
+            normalized == self._last_callee_transcript_normalized
+            and now - self._last_listen_guidance_monotonic < TRANSCRIPT_DUPLICATE_SUPPRESSION_SECONDS
+        ):
+            return
+
+        if (
+            self._last_listen_guidance_monotonic > 0
+            and now - self._last_listen_guidance_monotonic < LISTEN_FIRST_GUIDANCE_MIN_INTERVAL_SECONDS
+        ):
+            return
+
+        self._last_callee_transcript_normalized = normalized
+        self._last_listen_guidance_monotonic = now
+        self._quality_metrics["listen_first_guidance"] += 1
+        snippet = self._truncate_for_instruction(callee_text.replace('"', "'"), max_len=180)
+
+        await self._inject_runtime_instruction(
+            (
+                f'The callee just said: "{snippet}". In your next response, acknowledge that point first, '
+                "then continue with one concise sentence or one focused follow-up question. "
+                "Do not restart the full request or repeat your previous wording."
+            ),
+            force=False,
+        )
+
+    async def _inject_runtime_instruction(self, instruction: str, *, force: bool) -> None:
+        if not instruction.strip():
+            return
+        if not self.nova_session or not self.nova_session.is_active:
+            return
+
+        now = asyncio.get_running_loop().time()
+        if (
+            not force
+            and self._last_runtime_coaching_monotonic > 0
+            and now - self._last_runtime_coaching_monotonic < RUNTIME_COACHING_COOLDOWN_SECONDS
+        ):
+            return
+
+        self._last_runtime_coaching_monotonic = now
+        try:
+            await self.nova_session.inject_instruction(instruction.strip())
+        except Exception as exc:
+            logger.error("[%s] failed injecting runtime instruction: %s", self.call_sid, exc)
+
+    def _should_trigger_barge_in_clear(self) -> bool:
+        now = asyncio.get_running_loop().time()
+        if (
+            self._last_barge_in_clear_monotonic > 0
+            and now - self._last_barge_in_clear_monotonic < BARGE_IN_CLEAR_COOLDOWN_SECONDS
+        ):
+            return False
+        self._last_barge_in_clear_monotonic = now
+        return True
+
+    def _is_repetitive_agent_turn(self, text: str) -> bool:
+        normalized = self._normalize_transcript_for_dedupe(text)
+        if not normalized:
+            return False
+
+        recent = self._recent_agent_turns_normalized[-AGENT_REPETITION_WINDOW:]
+        repetitive = any(
+            self._agent_turn_similarity(normalized, previous)
+            >= AGENT_REPETITION_SIMILARITY_THRESHOLD
+            for previous in recent
+        )
+
+        self._recent_agent_turns_normalized.append(normalized)
+        if len(self._recent_agent_turns_normalized) > MAX_RECENT_AGENT_TURNS:
+            self._recent_agent_turns_normalized = self._recent_agent_turns_normalized[
+                -MAX_RECENT_AGENT_TURNS:
+            ]
+        return repetitive
+
+    def _agent_turn_similarity(self, left: str, right: str) -> float:
+        if not left or not right:
+            return 0.0
+        if left == right:
+            return 1.0
+        if left in right or right in left:
+            shorter = min(len(left), len(right))
+            longer = max(len(left), len(right))
+            if longer > 0:
+                return shorter / longer
+
+        left_tokens = set(left.split())
+        right_tokens = set(right.split())
+        if not left_tokens or not right_tokens:
+            return 0.0
+
+        overlap = len(left_tokens.intersection(right_tokens))
+        return overlap / max(len(left_tokens), len(right_tokens))
+
+    def _word_count(self, text: str) -> int:
+        return len(re.findall(r"\w+", text, flags=re.UNICODE))
+
+    def _truncate_for_instruction(self, text: str, max_len: int) -> str:
+        if len(text) <= max_len:
+            return text
+        return f"{text[: max_len - 3].rstrip()}..."
 
     def _should_emit_transcript(self, role: str, text: str) -> bool:
         normalized = self._normalize_transcript_for_dedupe(text)

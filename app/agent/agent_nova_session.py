@@ -102,12 +102,12 @@ class AgentNovaSession:
                 "event": {
                     "sessionStart": {
                         "inferenceConfiguration": {
-                            "maxTokens": 768,
+                            "maxTokens": 192,
                             "topP": 0.95,
-                            "temperature": 0.7,
+                            "temperature": 0.6,
                         },
                         "turnDetectionConfiguration": {
-                            "endpointingSensitivity": "LOW",
+                            "endpointingSensitivity": "MEDIUM",
                         },
                     }
                 }

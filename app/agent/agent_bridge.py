@@ -51,3 +51,20 @@ class AgentBridge:
             await self.twilio_ws.send_text(msg)
         except Exception as exc:
             logger.error("[%s] failed forwarding Nova audio to Twilio: %s", self.call_sid, exc)
+
+    async def clear_twilio_audio(self) -> None:
+        """Clear queued outbound audio so callee barge-in is heard immediately."""
+        if not self.twilio_ws or not self.stream_sid:
+            return
+
+        msg = json.dumps(
+            {
+                "event": "clear",
+                "streamSid": self.stream_sid,
+            }
+        )
+
+        try:
+            await self.twilio_ws.send_text(msg)
+        except Exception as exc:
+            logger.error("[%s] failed sending Twilio clear event: %s", self.call_sid, exc)
