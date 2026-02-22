@@ -35,11 +35,7 @@ class FakeActiveNovaSession:
 
 class FakeBridge:
     def __init__(self) -> None:
-        self.clear_calls = 0
         self.forwarded_payloads: list[str] = []
-
-    async def clear_twilio_audio(self) -> None:
-        self.clear_calls += 1
 
     async def forward_twilio_media_to_nova(self, payload: str, send_audio_cb) -> None:
         self.forwarded_payloads.append(payload)
@@ -170,7 +166,7 @@ def test_handle_transcript_triggers_repetition_guard():
     assert manager.status_payload()["quality_metrics"]["repeat_guard_triggers"] == 1
 
 
-def test_handle_twilio_media_barge_in_clear_is_disabled_by_default():
+def test_handle_twilio_media_forwards_payloads():
     manager = AgentCallManager(
         call_sid="CA_BARGE",
         config=AgentCallConfig(
@@ -183,7 +179,6 @@ def test_handle_twilio_media_barge_in_clear_is_disabled_by_default():
     )
     session = FakeActiveNovaSession()
     manager.nova_session = session  # type: ignore[assignment]
-    manager._agent_status = "speaking"
 
     bridge = FakeBridge()
     manager.bridge = bridge  # type: ignore[assignment]
@@ -195,6 +190,11 @@ def test_handle_twilio_media_barge_in_clear_is_disabled_by_default():
     asyncio.run(_run())
 
     assert bridge.forwarded_payloads == ["first", "second"]
-    assert bridge.clear_calls == 0
-    assert not any("callee started speaking" in instruction for instruction in session.instructions)
-    assert manager.status_payload()["quality_metrics"]["barge_in_interruptions"] == 0
+    assert session.instructions == []
+    assert set(manager.status_payload()["quality_metrics"].keys()) == {
+        "callee_turns",
+        "agent_turns",
+        "avg_agent_words_per_turn",
+        "repeat_guard_triggers",
+        "listen_first_guidance",
+    }

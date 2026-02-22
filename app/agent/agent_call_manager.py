@@ -32,13 +32,11 @@ MAX_NOVA_RESTART_ATTEMPTS = 5
 MIN_NOVA_RESTART_INTERVAL_SECONDS = 1.5
 TRANSCRIPT_DUPLICATE_SUPPRESSION_SECONDS = 20.0
 AUTO_END_AFTER_FAREWELL_SECONDS = 5.0
-BARGE_IN_CLEAR_COOLDOWN_SECONDS = 1.0
 LISTEN_FIRST_GUIDANCE_MIN_INTERVAL_SECONDS = 1.2
 RUNTIME_COACHING_COOLDOWN_SECONDS = 0.75
 MAX_RECENT_AGENT_TURNS = 6
 AGENT_REPETITION_WINDOW = 4
 AGENT_REPETITION_SIMILARITY_THRESHOLD = 0.84
-ENABLE_AGENT_BARGE_IN_CLEAR = False
 
 
 @dataclass
@@ -81,8 +79,6 @@ class AgentCallManager:
         self._recent_transcript_emit_monotonic: dict[str, float] = {}
         self._auto_end_task: asyncio.Task | None = None
         self._has_callee_uttered = False
-        self._agent_status = "idle"
-        self._last_barge_in_clear_monotonic = 0.0
         self._last_runtime_coaching_monotonic = 0.0
         self._last_listen_guidance_monotonic = 0.0
         self._last_callee_transcript_normalized = ""
@@ -93,7 +89,6 @@ class AgentCallManager:
             "agent_words": 0,
             "repeat_guard_triggers": 0,
             "listen_first_guidance": 0,
-            "barge_in_interruptions": 0,
         }
 
     def status_payload(self) -> dict:
@@ -205,20 +200,6 @@ class AgentCallManager:
         if not await self.ensure_nova_session():
             return
 
-        # Twilio "clear" can clip agent speech if fired aggressively on inbound media.
-        # Keep this disabled by default until we add robust speech activity gating.
-        if (
-            ENABLE_AGENT_BARGE_IN_CLEAR
-            and self._agent_status == "speaking"
-            and self._should_trigger_barge_in_clear()
-        ):
-            await self.bridge.clear_twilio_audio()
-            self._quality_metrics["barge_in_interruptions"] += 1
-            await self._inject_runtime_instruction(
-                "The callee started speaking. Stop talking immediately, listen, and in the next turn respond briefly to what they said.",
-                force=True,
-            )
-
         await self.bridge.forward_twilio_media_to_nova(payload, self.nova_session.send_audio)
 
     async def handle_nova_audio(self, audio_data: bytes) -> None:
@@ -287,7 +268,6 @@ class AgentCallManager:
             self._schedule_auto_end_after_farewell()
 
     async def handle_agent_status(self, status: str) -> None:
-        self._agent_status = status
         await self._send_ios({"type": "agent_status", "status": status})
 
     async def inject_instruction(self, instruction: str) -> None:
@@ -353,7 +333,6 @@ class AgentCallManager:
             "avg_agent_words_per_turn": round(avg_words, 2),
             "repeat_guard_triggers": int(self._quality_metrics.get("repeat_guard_triggers", 0)),
             "listen_first_guidance": int(self._quality_metrics.get("listen_first_guidance", 0)),
-            "barge_in_interruptions": int(self._quality_metrics.get("barge_in_interruptions", 0)),
         }
 
     async def _maybe_inject_listen_first_guidance(self, callee_text: str) -> None:
@@ -407,16 +386,6 @@ class AgentCallManager:
             await self.nova_session.inject_instruction(instruction.strip())
         except Exception as exc:
             logger.error("[%s] failed injecting runtime instruction: %s", self.call_sid, exc)
-
-    def _should_trigger_barge_in_clear(self) -> bool:
-        now = asyncio.get_running_loop().time()
-        if (
-            self._last_barge_in_clear_monotonic > 0
-            and now - self._last_barge_in_clear_monotonic < BARGE_IN_CLEAR_COOLDOWN_SECONDS
-        ):
-            return False
-        self._last_barge_in_clear_monotonic = now
-        return True
 
     def _is_repetitive_agent_turn(self, text: str) -> bool:
         normalized = self._normalize_transcript_for_dedupe(text)
