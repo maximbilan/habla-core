@@ -20,6 +20,31 @@ async def _noop_status(_: str) -> None:
     return None
 
 
+class FakeActiveNovaSession:
+    def __init__(self) -> None:
+        self.is_active = True
+        self.instructions: list[str] = []
+        self.audio_chunks: list[bytes] = []
+
+    async def inject_instruction(self, instruction_text: str) -> None:
+        self.instructions.append(instruction_text)
+
+    async def send_audio(self, pcm_audio: bytes) -> None:
+        self.audio_chunks.append(pcm_audio)
+
+
+class FakeBridge:
+    def __init__(self) -> None:
+        self.clear_calls = 0
+        self.forwarded_payloads: list[str] = []
+
+    async def clear_twilio_audio(self) -> None:
+        self.clear_calls += 1
+
+    async def forward_twilio_media_to_nova(self, payload: str, send_audio_cb) -> None:
+        self.forwarded_payloads.append(payload)
+
+
 class CaptureAgentNovaSession(AgentNovaSession):
     def __init__(self) -> None:
         super().__init__(
@@ -89,3 +114,87 @@ def test_ensure_nova_session_fails_after_restart_limit():
 
     assert result is False
     assert manager.status == "failed"
+
+
+def test_handle_transcript_injects_listen_first_guidance():
+    manager = AgentCallManager(
+        call_sid="CA_LISTEN",
+        config=AgentCallConfig(
+            to_number="+12025550100",
+            from_number=None,
+            prompt="Test",
+            user_name="Tester",
+            language="es",
+        ),
+    )
+    session = FakeActiveNovaSession()
+    manager.nova_session = session  # type: ignore[assignment]
+
+    async def fake_translate(source_text: str) -> str:
+        return source_text
+
+    manager.transcript.translate_to_english = fake_translate  # type: ignore[method-assign]
+
+    asyncio.run(manager.handle_transcript("callee", "Necesito confirmar el horario de hoy."))
+
+    assert any("acknowledge that point first" in instruction for instruction in session.instructions)
+    assert manager.status_payload()["quality_metrics"]["listen_first_guidance"] == 1
+
+
+def test_handle_transcript_triggers_repetition_guard():
+    manager = AgentCallManager(
+        call_sid="CA_REPEAT",
+        config=AgentCallConfig(
+            to_number="+12025550100",
+            from_number=None,
+            prompt="Test",
+            user_name="Tester",
+            language="es",
+        ),
+    )
+    session = FakeActiveNovaSession()
+    manager.nova_session = session  # type: ignore[assignment]
+
+    async def fake_translate(source_text: str) -> str:
+        return source_text
+
+    manager.transcript.translate_to_english = fake_translate  # type: ignore[method-assign]
+
+    async def _run() -> None:
+        await manager.handle_transcript("agent", "Claro, le puedo ayudar con eso ahora.")
+        await manager.handle_transcript("agent", "Claro, le puedo ayudar con eso ahora mismo.")
+
+    asyncio.run(_run())
+
+    assert any("repeating prior phrasing" in instruction for instruction in session.instructions)
+    assert manager.status_payload()["quality_metrics"]["repeat_guard_triggers"] == 1
+
+
+def test_handle_twilio_media_barge_in_clears_audio_with_cooldown():
+    manager = AgentCallManager(
+        call_sid="CA_BARGE",
+        config=AgentCallConfig(
+            to_number="+12025550100",
+            from_number=None,
+            prompt="Test",
+            user_name="Tester",
+            language="es",
+        ),
+    )
+    session = FakeActiveNovaSession()
+    manager.nova_session = session  # type: ignore[assignment]
+    manager._agent_status = "speaking"
+
+    bridge = FakeBridge()
+    manager.bridge = bridge  # type: ignore[assignment]
+
+    async def _run() -> None:
+        await manager.handle_twilio_media("first")
+        await manager.handle_twilio_media("second")
+
+    asyncio.run(_run())
+
+    assert bridge.forwarded_payloads == ["first", "second"]
+    assert bridge.clear_calls == 1
+    assert any("callee started speaking" in instruction for instruction in session.instructions)
+    assert manager.status_payload()["quality_metrics"]["barge_in_interruptions"] == 1
