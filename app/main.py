@@ -247,7 +247,7 @@ async def get_call_status(call_sid: str):
 
 
 @app.post("/twilio/webhook")
-async def twilio_webhook(request: Request):
+async def twilio_webhook():
     """
     Called by Twilio when the outbound call connects.
 
