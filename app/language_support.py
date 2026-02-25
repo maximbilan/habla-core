@@ -30,6 +30,17 @@ SUPPORTED_NOVA_LANGUAGES: dict[str, SupportedLanguage] = {
     "hi-IN": SupportedLanguage("hi-IN", "Hindi", "India", "arjun"),
 }
 
+VOICE_ID_BY_LANGUAGE_MALE: dict[str, str] = {
+    code: language.default_voice_id
+    for code, language in SUPPORTED_NOVA_LANGUAGES.items()
+}
+
+VOICE_ID_BY_LANGUAGE_FEMALE: dict[str, str] = {
+    code: language.default_voice_id
+    for code, language in SUPPORTED_NOVA_LANGUAGES.items()
+}
+VOICE_ID_BY_LANGUAGE_FEMALE["en-US"] = "amy"
+
 DEFAULT_SOURCE_LANGUAGE = "en-US"
 DEFAULT_TARGET_LANGUAGE = "es-US"
 
@@ -41,6 +52,13 @@ LANGUAGE_ALIASES: dict[str, str] = {
     "it": "it-IT",
     "pt": "pt-BR",
     "hi": "hi-IN",
+}
+
+VOICE_GENDER_FEMALE = "female"
+VOICE_GENDER_MALE = "male"
+SUPPORTED_VOICE_GENDERS = {
+    VOICE_GENDER_FEMALE,
+    VOICE_GENDER_MALE,
 }
 
 
@@ -97,6 +115,37 @@ def build_translation_system_prompt(source_language: str, target_language: str) 
 
 def default_voice_id_for_language(language_code: str) -> str:
     return SUPPORTED_NOVA_LANGUAGES[language_code].default_voice_id
+
+
+def normalize_voice_gender(voice_gender: str | None) -> str | None:
+    if voice_gender is None:
+        return None
+
+    normalized = voice_gender.strip().lower()
+    if not normalized:
+        return None
+
+    if normalized not in SUPPORTED_VOICE_GENDERS:
+        raise ValueError("voice_gender must be either 'female' or 'male'")
+
+    return normalized
+
+
+def voice_id_for_language(language_code: str, voice_gender: str | None) -> str:
+    normalized_gender = normalize_voice_gender(voice_gender)
+    if normalized_gender is None:
+        return default_voice_id_for_language(language_code)
+
+    if normalized_gender == VOICE_GENDER_MALE:
+        return VOICE_ID_BY_LANGUAGE_MALE.get(
+            language_code,
+            default_voice_id_for_language(language_code),
+        )
+
+    return VOICE_ID_BY_LANGUAGE_FEMALE.get(
+        language_code,
+        default_voice_id_for_language(language_code),
+    )
 
 
 def supported_languages_payload() -> list[dict[str, str]]:

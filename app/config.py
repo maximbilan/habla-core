@@ -41,9 +41,6 @@ HABLA_APP_BUNDLE_ID = os.getenv("HABLA_APP_BUNDLE_ID", "com.maximbilan.habla-ios
 # Nova 2 Sonic
 # ---------------------------------------------------------------------------
 NOVA_MODEL_ID = "amazon.nova-2-sonic-v1:0"
-# Keep EN/ES voice overrides for backwards compatibility.
-NOVA_VOICE_ID_EN = os.getenv("NOVA_VOICE_ID_EN", "matthew")
-NOVA_VOICE_ID_ES = os.getenv("NOVA_VOICE_ID_ES", "lupe")
 
 # Audio constants
 INPUT_SAMPLE_RATE = 16000   # PCM input to Nova

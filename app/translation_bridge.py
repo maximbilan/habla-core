@@ -30,14 +30,12 @@ from app.audio_utils import (
     pcm_24k_to_pcm_16k,
 )
 from app.config import (
-    NOVA_VOICE_ID_EN,
-    NOVA_VOICE_ID_ES,
     INPUT_SAMPLE_RATE,
     OUTPUT_SAMPLE_RATE,
 )
 from app.language_support import (
     build_translation_system_prompt,
-    default_voice_id_for_language,
+    voice_id_for_language,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,10 +53,12 @@ class TranslationBridge:
         call_sid: str,
         source_language: str,
         target_language: str,
+        voice_gender: str | None = None,
     ) -> None:
         self.call_sid = call_sid
         self.source_language = source_language
         self.target_language = target_language
+        self.voice_gender = voice_gender
 
         self.session_a: Optional[NovaSonicSession] = None  # source → target
         self.session_b: Optional[NovaSonicSession] = None  # target → source
@@ -249,11 +249,7 @@ class TranslationBridge:
             return None
 
     def _voice_id_for_language(self, language_code: str) -> str:
-        if language_code == "en-US":
-            return NOVA_VOICE_ID_EN
-        if language_code == "es-US":
-            return NOVA_VOICE_ID_ES
-        return default_voice_id_for_language(language_code)
+        return voice_id_for_language(language_code, self.voice_gender)
 
     async def _restart_session_a(self) -> bool:
         """Restart Session A after an unexpected failure."""

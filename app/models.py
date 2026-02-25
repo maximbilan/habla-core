@@ -9,6 +9,7 @@ class CallRequest(BaseModel):
     from_: str | None = Field(default=None, alias="from")
     source_language: str = DEFAULT_SOURCE_LANGUAGE
     target_language: str = DEFAULT_TARGET_LANGUAGE
+    voice_gender: str | None = None
 
     model_config = {"populate_by_name": True}
 

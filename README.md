@@ -79,7 +79,8 @@ curl -X POST http://localhost:8000/call \
   -d '{
     "to": "+34612345678",
     "source_language": "en-US",
-    "target_language": "es-US"
+    "target_language": "es-US",
+    "voice_gender": "female"
   }'
 
 # Returns: {"call_sid": "CA...", "status": "initiating"}
@@ -112,9 +113,12 @@ Twilio webhook/media endpoints are intentionally excluded from this auth.
   "to": "+12025550123",
   "from": "+12025550199",
   "source_language": "en-US",
-  "target_language": "de-DE"
+  "target_language": "de-DE",
+  "voice_gender": "male"
 }
 ```
+
+`voice_gender` is optional and accepts `female` or `male`. If omitted, backend defaults are used.
 
 ## Docker
 

@@ -49,10 +49,11 @@ def test_create_call_creates_state_and_bridge(monkeypatch):
         return "CA123", "+12025550123"
 
     class DummyBridge:
-        def __init__(self, call_sid, source_language, target_language):
+        def __init__(self, call_sid, source_language, target_language, voice_gender=None):
             self.call_sid = call_sid
             self.source_language = source_language
             self.target_language = target_language
+            self.voice_gender = voice_gender
 
     monkeypatch.setattr(main, "initiate_outbound_call", fake_initiate_outbound_call)
     monkeypatch.setattr(main, "TranslationBridge", DummyBridge)
@@ -64,6 +65,7 @@ def test_create_call_creates_state_and_bridge(monkeypatch):
             "from": "+12025550123",
             "source_language": "fr",
             "target_language": "de-DE",
+            "voice_gender": "female",
         },
         headers=_auth_headers(),
     )
@@ -80,6 +82,7 @@ def test_create_call_creates_state_and_bridge(monkeypatch):
     assert state.bridge.call_sid == "CA123"
     assert state.bridge.source_language == "fr-FR"
     assert state.bridge.target_language == "de-DE"
+    assert state.bridge.voice_gender == "female"
 
 
 def test_get_call_status_uses_cached_state():
@@ -150,6 +153,28 @@ def test_create_call_rejects_unsupported_language(monkeypatch):
     )
     assert resp.status_code == 422
     assert "Unsupported source_language" in resp.json()["detail"]
+
+
+def test_create_call_rejects_invalid_voice_gender(monkeypatch):
+    client = TestClient(main.app)
+
+    def fake_initiate_outbound_call(to_number, from_number=None):
+        return "CA123", "+12025550123"
+
+    monkeypatch.setattr(main, "initiate_outbound_call", fake_initiate_outbound_call)
+
+    resp = client.post(
+        "/call",
+        json={
+            "to": "+34999999999",
+            "source_language": "en-US",
+            "target_language": "es-US",
+            "voice_gender": "robot",
+        },
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 422
+    assert "voice_gender must be either 'female' or 'male'" in resp.json()["detail"]
 
 
 def test_translation_languages_endpoint():
@@ -241,6 +266,7 @@ def test_create_agent_call_creates_state(monkeypatch):
             "prompt": "Confirm an appointment for tomorrow.",
             "user_name": "Max",
             "language": "es",
+            "voice_gender": "male",
         },
         headers=_auth_headers(),
     )
@@ -254,6 +280,7 @@ def test_create_agent_call_creates_state(monkeypatch):
     assert manager.config.prompt == "Confirm an appointment for tomorrow."
     assert manager.config.user_name == "Max"
     assert manager.config.language == "es-US"
+    assert manager.config.voice_gender == "male"
 
 
 def test_create_agent_call_rejects_unsupported_language():
@@ -269,6 +296,22 @@ def test_create_agent_call_rejects_unsupported_language():
     )
     assert resp.status_code == 422
     assert "Unsupported language" in resp.json()["detail"]
+
+
+def test_create_agent_call_rejects_invalid_voice_gender():
+    client = TestClient(main.app)
+    resp = client.post(
+        "/agent/call",
+        json={
+            "to": "+34999999999",
+            "prompt": "Test prompt",
+            "language": "es",
+            "voice_gender": "robot",
+        },
+        headers=_auth_headers(),
+    )
+    assert resp.status_code == 422
+    assert "voice_gender must be either 'female' or 'male'" in resp.json()["detail"]
 
 
 def test_get_agent_call_status_returns_payload(monkeypatch):

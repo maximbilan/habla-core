@@ -30,6 +30,7 @@ from app.translation_bridge import TranslationBridge
 from app.language_support import (
     DEFAULT_SOURCE_LANGUAGE,
     DEFAULT_TARGET_LANGUAGE,
+    normalize_voice_gender,
     resolve_supported_language,
     resolve_translation_languages,
     supported_languages_payload,
@@ -80,6 +81,7 @@ class AgentCallRequest(BaseModel):
     prompt: str
     user_name: str = "Caller"
     language: str = DEFAULT_TARGET_LANGUAGE
+    voice_gender: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -174,6 +176,7 @@ async def create_call(req: CallRequest):
             req.source_language,
             req.target_language,
         )
+        voice_gender = normalize_voice_gender(req.voice_gender)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -196,6 +199,7 @@ async def create_call(req: CallRequest):
         call_sid=call_sid,
         source_language=source_language,
         target_language=target_language,
+        voice_gender=voice_gender,
     )
 
     return CallResponse(call_sid=call_sid, status=CallStatus.INITIATING)
@@ -267,6 +271,10 @@ async def create_agent_call(req: AgentCallRequest):
     language = resolve_supported_language(req.language)
     if not language:
         raise HTTPException(status_code=422, detail=f"Unsupported language '{req.language}'")
+    try:
+        voice_gender = normalize_voice_gender(req.voice_gender)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     try:
         call_sid, caller_id = initiate_agent_outbound_call(req.to, req.from_)
@@ -284,6 +292,7 @@ async def create_agent_call(req: AgentCallRequest):
             prompt=req.prompt,
             user_name=req.user_name,
             language=language.code,
+            voice_gender=voice_gender,
         ),
     )
     return AgentCallResponse(call_sid=call_sid, status="initiating")

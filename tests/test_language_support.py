@@ -2,8 +2,10 @@ from app.language_support import (
     DEFAULT_SOURCE_LANGUAGE,
     DEFAULT_TARGET_LANGUAGE,
     build_translation_system_prompt,
+    normalize_voice_gender,
     resolve_supported_language,
     resolve_translation_languages,
+    voice_id_for_language,
 )
 
 
@@ -32,3 +34,23 @@ def test_build_translation_system_prompt_mentions_languages():
     prompt = build_translation_system_prompt(DEFAULT_SOURCE_LANGUAGE, DEFAULT_TARGET_LANGUAGE)
     assert "English (US)" in prompt
     assert "Spanish (US)" in prompt
+
+
+def test_normalize_voice_gender_accepts_none_and_known_values():
+    assert normalize_voice_gender(None) is None
+    assert normalize_voice_gender("female") == "female"
+    assert normalize_voice_gender(" MALE ") == "male"
+
+
+def test_normalize_voice_gender_rejects_unknown_value():
+    try:
+        normalize_voice_gender("robot")
+    except ValueError as exc:
+        assert "voice_gender must be either 'female' or 'male'" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_voice_id_for_language_uses_gender_overrides_for_english():
+    assert voice_id_for_language("en-US", "male") == "matthew"
+    assert voice_id_for_language("en-US", "female") == "amy"
