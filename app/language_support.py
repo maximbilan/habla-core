@@ -3,13 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from app.config import (
-    NOVA_VOICE_ID_EN,
-    NOVA_VOICE_ID_EN_FEMALE,
-    NOVA_VOICE_ID_ES,
-    NOVA_VOICE_ID_ES_FEMALE,
-    NOVA_VOICE_ID_ES_MALE,
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +29,17 @@ SUPPORTED_NOVA_LANGUAGES: dict[str, SupportedLanguage] = {
     "pt-BR": SupportedLanguage("pt-BR", "Portuguese", "Brazil", "leo"),
     "hi-IN": SupportedLanguage("hi-IN", "Hindi", "India", "arjun"),
 }
+
+VOICE_ID_BY_LANGUAGE_MALE: dict[str, str] = {
+    code: language.default_voice_id
+    for code, language in SUPPORTED_NOVA_LANGUAGES.items()
+}
+
+VOICE_ID_BY_LANGUAGE_FEMALE: dict[str, str] = {
+    code: language.default_voice_id
+    for code, language in SUPPORTED_NOVA_LANGUAGES.items()
+}
+VOICE_ID_BY_LANGUAGE_FEMALE["en-US"] = "amy"
 
 DEFAULT_SOURCE_LANGUAGE = "en-US"
 DEFAULT_TARGET_LANGUAGE = "es-US"
@@ -133,17 +137,15 @@ def voice_id_for_language(language_code: str, voice_gender: str | None) -> str:
         return default_voice_id_for_language(language_code)
 
     if normalized_gender == VOICE_GENDER_MALE:
-        if language_code == "en-US":
-            return NOVA_VOICE_ID_EN
-        if language_code == "es-US":
-            return NOVA_VOICE_ID_ES_MALE
-        return default_voice_id_for_language(language_code)
+        return VOICE_ID_BY_LANGUAGE_MALE.get(
+            language_code,
+            default_voice_id_for_language(language_code),
+        )
 
-    if language_code == "en-US":
-        return NOVA_VOICE_ID_EN_FEMALE
-    if language_code == "es-US":
-        return NOVA_VOICE_ID_ES_FEMALE
-    return default_voice_id_for_language(language_code)
+    return VOICE_ID_BY_LANGUAGE_FEMALE.get(
+        language_code,
+        default_voice_id_for_language(language_code),
+    )
 
 
 def supported_languages_payload() -> list[dict[str, str]]:
