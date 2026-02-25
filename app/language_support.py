@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 
@@ -30,8 +31,22 @@ SUPPORTED_NOVA_LANGUAGES: dict[str, SupportedLanguage] = {
     "hi-IN": SupportedLanguage("hi-IN", "Hindi", "India", "arjun"),
 }
 
+_VOICE_IDS_TYPICALLY_FEMALE = {
+    "amy",
+    "olivia",
+    "kiara",
+    "lupe",
+}
+_MALE_FALLBACK_VOICE_ID = os.getenv("NOVA_VOICE_ID_EN", "matthew").strip() or "matthew"
+
 VOICE_ID_BY_LANGUAGE_MALE: dict[str, str] = {
-    code: language.default_voice_id
+    # Some locale defaults are female-only in practice; use a known male fallback
+    # so selecting `male` has an audible effect across locales.
+    code: (
+        _MALE_FALLBACK_VOICE_ID
+        if language.default_voice_id in _VOICE_IDS_TYPICALLY_FEMALE
+        else language.default_voice_id
+    )
     for code, language in SUPPORTED_NOVA_LANGUAGES.items()
 }
 

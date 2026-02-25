@@ -119,6 +119,7 @@ Twilio webhook/media endpoints are intentionally excluded from this auth.
 ```
 
 `voice_gender` is optional and accepts `female` or `male`. If omitted, backend defaults are used.
+For locales whose Nova default voice is female, the backend uses `NOVA_VOICE_ID_EN` as the male fallback (default `matthew`).
 
 ## Docker
 
