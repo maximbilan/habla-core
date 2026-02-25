@@ -54,3 +54,8 @@ def test_normalize_voice_gender_rejects_unknown_value():
 def test_voice_id_for_language_uses_gender_overrides_for_english():
     assert voice_id_for_language("en-US", "male") == "matthew"
     assert voice_id_for_language("en-US", "female") == "amy"
+
+
+def test_voice_id_for_language_uses_male_fallback_for_spanish_us():
+    assert voice_id_for_language("es-US", "male") == "matthew"
+    assert voice_id_for_language("es-US", "female") == "lupe"
