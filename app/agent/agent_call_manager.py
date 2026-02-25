@@ -16,14 +16,12 @@ from app.agent.prompts import build_agent_prompt
 from app.agent.transcript import TranscriptService
 from app.config import (
     PUBLIC_URL,
-    NOVA_VOICE_ID_EN,
-    NOVA_VOICE_ID_ES,
 )
 from app.caller_id.service import create_outbound_call, get_twilio_client
 from app.language_support import (
     DEFAULT_TARGET_LANGUAGE,
-    default_voice_id_for_language,
     resolve_supported_language,
+    voice_id_for_language,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +44,7 @@ class AgentCallConfig:
     prompt: str
     user_name: str
     language: str = DEFAULT_TARGET_LANGUAGE
+    voice_gender: str | None = None
 
 
 class AgentCallManager:
@@ -316,11 +315,7 @@ class AgentCallManager:
             self.ios_websocket = None
 
     def _voice_id_for_language(self, language_code: str) -> str:
-        if language_code == "en-US":
-            return NOVA_VOICE_ID_EN
-        if language_code == "es-US":
-            return NOVA_VOICE_ID_ES
-        return default_voice_id_for_language(language_code)
+        return voice_id_for_language(language_code, self.config.voice_gender)
 
     def _quality_metrics_payload(self) -> dict[str, int | float]:
         agent_turns = int(self._quality_metrics.get("agent_turns", 0))

@@ -3,6 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from app.config import (
+    NOVA_VOICE_ID_EN,
+    NOVA_VOICE_ID_EN_FEMALE,
+    NOVA_VOICE_ID_ES,
+    NOVA_VOICE_ID_ES_FEMALE,
+    NOVA_VOICE_ID_ES_MALE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +48,13 @@ LANGUAGE_ALIASES: dict[str, str] = {
     "it": "it-IT",
     "pt": "pt-BR",
     "hi": "hi-IN",
+}
+
+VOICE_GENDER_FEMALE = "female"
+VOICE_GENDER_MALE = "male"
+SUPPORTED_VOICE_GENDERS = {
+    VOICE_GENDER_FEMALE,
+    VOICE_GENDER_MALE,
 }
 
 
@@ -97,6 +111,39 @@ def build_translation_system_prompt(source_language: str, target_language: str) 
 
 def default_voice_id_for_language(language_code: str) -> str:
     return SUPPORTED_NOVA_LANGUAGES[language_code].default_voice_id
+
+
+def normalize_voice_gender(voice_gender: str | None) -> str | None:
+    if voice_gender is None:
+        return None
+
+    normalized = voice_gender.strip().lower()
+    if not normalized:
+        return None
+
+    if normalized not in SUPPORTED_VOICE_GENDERS:
+        raise ValueError("voice_gender must be either 'female' or 'male'")
+
+    return normalized
+
+
+def voice_id_for_language(language_code: str, voice_gender: str | None) -> str:
+    normalized_gender = normalize_voice_gender(voice_gender)
+    if normalized_gender is None:
+        return default_voice_id_for_language(language_code)
+
+    if normalized_gender == VOICE_GENDER_MALE:
+        if language_code == "en-US":
+            return NOVA_VOICE_ID_EN
+        if language_code == "es-US":
+            return NOVA_VOICE_ID_ES_MALE
+        return default_voice_id_for_language(language_code)
+
+    if language_code == "en-US":
+        return NOVA_VOICE_ID_EN_FEMALE
+    if language_code == "es-US":
+        return NOVA_VOICE_ID_ES_FEMALE
+    return default_voice_id_for_language(language_code)
 
 
 def supported_languages_payload() -> list[dict[str, str]]:
