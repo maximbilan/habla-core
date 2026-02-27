@@ -3,6 +3,7 @@ from twilio.rest import Client
 
 from fastapi import HTTPException
 
+from app.caller_id.ownership_client import OwnershipServiceError, get_claim
 from app.config import (
     TWILIO_ACCOUNT_SID,
     TWILIO_AUTH_TOKEN,
@@ -24,10 +25,20 @@ def get_twilio_client() -> Client:
     return Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 
-def resolve_outbound_caller_id(client: Client, from_number: str | None) -> str:
+def resolve_outbound_caller_id(
+    client: Client,
+    from_number: str | None,
+    device_id: str | None = None,
+) -> str:
     """Return verified caller ID to use for outbound calls."""
     if not from_number:
         return TWILIO_FROM_NUMBER
+
+    if not device_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing X-Habla-Device-ID header for custom caller ID",
+        )
 
     existing = client.outgoing_caller_ids.list(phone_number=from_number)
     if not existing:
@@ -38,6 +49,24 @@ def resolve_outbound_caller_id(client: Client, from_number: str | None) -> str:
                 "Verify it first via POST /caller-id/verify/start"
             ),
         )
+
+    sid = existing[0].sid
+    try:
+        claim = get_claim(sid)
+    except OwnershipServiceError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+        ) from exc
+
+    if not claim or claim.device_id != device_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Phone number {from_number} is not available on this device. "
+                "Verify it on this device first via POST /caller-id/verify/start"
+            ),
+        )
     return from_number
 
 
@@ -45,13 +74,14 @@ def create_outbound_call(
     *,
     to_number: str,
     from_number: str | None = None,
+    device_id: str | None = None,
     webhook_url: str | None = None,
     twiml: str | None = None,
     method: str = "POST",
 ) -> tuple[str, str]:
     """Create a Twilio outbound call with optional custom caller ID."""
     client = get_twilio_client()
-    caller_id = resolve_outbound_caller_id(client, from_number)
+    caller_id = resolve_outbound_caller_id(client, from_number, device_id)
 
     create_kwargs: dict = {"to": to_number, "from_": caller_id}
     if webhook_url:

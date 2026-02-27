@@ -93,3 +93,15 @@ def test_require_authorized_websocket_rejects_invalid_token(monkeypatch):
         request_auth.require_authorized_websocket(DummyWS())
 
     assert exc.value.code == status.WS_1008_POLICY_VIOLATION
+
+
+def test_optional_device_id_trims_and_returns_none_when_missing():
+    assert request_auth.optional_device_id("  abc  ") == "abc"
+    assert request_auth.optional_device_id(None) is None
+    assert request_auth.optional_device_id("   ") is None
+
+
+def test_require_device_id_raises_when_missing():
+    with pytest.raises(HTTPException) as exc:
+        request_auth.require_device_id("   ")
+    assert exc.value.status_code == 400

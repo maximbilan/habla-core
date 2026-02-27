@@ -18,9 +18,10 @@ def _clear_calls():
 
 
 def _auth_headers() -> dict[str, str]:
-    if not auth_enabled():
-        return {}
-    return {"Authorization": _expected_token()}
+    headers = {"X-Habla-Device-ID": "test-device"}
+    if auth_enabled():
+        headers["Authorization"] = _expected_token()
+    return headers
 
 
 def test_health():
@@ -43,9 +44,10 @@ def test_protected_route_rejects_missing_auth_when_enabled(monkeypatch):
 def test_create_call_creates_state_and_bridge(monkeypatch):
     client = TestClient(main.app)
 
-    def fake_initiate_outbound_call(to_number, from_number=None):
+    def fake_initiate_outbound_call(to_number, from_number=None, device_id=None):
         assert to_number == "+34999999999"
         assert from_number == "+12025550123"
+        assert device_id == "test-device"
         return "CA123", "+12025550123"
 
     class DummyBridge:
@@ -137,7 +139,7 @@ def test_get_call_status_falls_back_to_twilio(monkeypatch):
 def test_create_call_rejects_unsupported_language(monkeypatch):
     client = TestClient(main.app)
 
-    def fake_initiate_outbound_call(to_number, from_number=None):
+    def fake_initiate_outbound_call(to_number, from_number=None, device_id=None):
         return "CA123", "+12025550123"
 
     monkeypatch.setattr(main, "initiate_outbound_call", fake_initiate_outbound_call)
@@ -158,7 +160,7 @@ def test_create_call_rejects_unsupported_language(monkeypatch):
 def test_create_call_rejects_invalid_voice_gender(monkeypatch):
     client = TestClient(main.app)
 
-    def fake_initiate_outbound_call(to_number, from_number=None):
+    def fake_initiate_outbound_call(to_number, from_number=None, device_id=None):
         return "CA123", "+12025550123"
 
     monkeypatch.setattr(main, "initiate_outbound_call", fake_initiate_outbound_call)
@@ -251,9 +253,10 @@ def test_end_call_hangs_up_and_cleans(monkeypatch):
 def test_create_agent_call_creates_state(monkeypatch):
     client = TestClient(main.app)
 
-    def fake_initiate_agent_outbound_call(to_number, from_number=None):
+    def fake_initiate_agent_outbound_call(to_number, from_number=None, device_id=None):
         assert to_number == "+34999999999"
         assert from_number == "+12025550123"
+        assert device_id == "test-device"
         return "CA_AGENT_1", "+12025550123"
 
     monkeypatch.setattr(main, "initiate_agent_outbound_call", fake_initiate_agent_outbound_call)

@@ -15,6 +15,8 @@ from fastapi import Header, HTTPException, WebSocket, WebSocketException, status
 
 from app.config import HABLA_APP_BUNDLE_ID, HABLA_SECRET
 
+DEVICE_ID_HEADER = "X-Habla-Device-ID"
+
 
 def auth_enabled() -> bool:
     return bool(HABLA_SECRET)
@@ -28,6 +30,10 @@ def _normalize_authorization_token(authorization: str | None) -> str:
     if value.lower().startswith("bearer "):
         value = value[7:].strip()
     return value
+
+
+def _normalize_device_id(device_id: str | None) -> str:
+    return (device_id or "").strip()
 
 
 @lru_cache(maxsize=1)
@@ -55,6 +61,25 @@ def is_authorized(authorization: str | None) -> bool:
 def require_authorized_request(authorization: str | None = Header(default=None)) -> None:
     if not is_authorized(authorization):
         raise HTTPException(status_code=401, detail="unauthorized")
+
+
+def optional_device_id(
+    x_habla_device_id: str | None = Header(default=None, alias=DEVICE_ID_HEADER),
+) -> str | None:
+    normalized = _normalize_device_id(x_habla_device_id)
+    return normalized or None
+
+
+def require_device_id(
+    x_habla_device_id: str | None = Header(default=None, alias=DEVICE_ID_HEADER),
+) -> str:
+    normalized = _normalize_device_id(x_habla_device_id)
+    if not normalized:
+        raise HTTPException(
+            status_code=400,
+            detail=f"missing {DEVICE_ID_HEADER} header",
+        )
+    return normalized
 
 
 def require_authorized_websocket(ws: WebSocket) -> None:
