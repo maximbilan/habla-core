@@ -39,6 +39,7 @@ from app.agent import AgentCallConfig, agent_calls, initiate_agent_outbound_call
 from app.caller_id.router import router as caller_id_router
 from app.request_auth import (
     auth_enabled,
+    optional_device_id,
     require_authorized_request,
     require_authorized_websocket,
 )
@@ -169,7 +170,10 @@ async def get_translation_languages():
 
 
 @app.post("/call", response_model=CallResponse, dependencies=[Depends(require_authorized_request)])
-async def create_call(req: CallRequest):
+async def create_call(
+    req: CallRequest,
+    device_id: str | None = Depends(optional_device_id),
+):
     """Initiate an outbound translated call."""
     try:
         source_language, target_language = resolve_translation_languages(
@@ -181,7 +185,11 @@ async def create_call(req: CallRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
     try:
-        call_sid, caller_id = initiate_outbound_call(req.to, req.from_)
+        call_sid, caller_id = initiate_outbound_call(
+            req.to,
+            req.from_,
+            device_id=device_id,
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -267,7 +275,10 @@ async def twilio_webhook():
 # ===================================================================
 
 @app.post("/agent/call", response_model=AgentCallResponse, dependencies=[Depends(require_authorized_request)])
-async def create_agent_call(req: AgentCallRequest):
+async def create_agent_call(
+    req: AgentCallRequest,
+    device_id: str | None = Depends(optional_device_id),
+):
     language = resolve_supported_language(req.language)
     if not language:
         raise HTTPException(status_code=422, detail=f"Unsupported language '{req.language}'")
@@ -277,7 +288,11 @@ async def create_agent_call(req: AgentCallRequest):
         raise HTTPException(status_code=422, detail=str(e))
 
     try:
-        call_sid, caller_id = initiate_agent_outbound_call(req.to, req.from_)
+        call_sid, caller_id = initiate_agent_outbound_call(
+            req.to,
+            req.from_,
+            device_id=device_id,
+        )
     except HTTPException:
         raise
     except Exception as e:

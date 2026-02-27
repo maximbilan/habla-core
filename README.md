@@ -55,6 +55,8 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your AWS and Twilio credentials
 # Optional but recommended: set HABLA_SECRET to enable request auth
+# Required for caller-id ownership isolation:
+# HABLA_ACCOUNTS_BASE_URL, HABLA_ACCOUNTS_SERVICE_TOKEN
 ```
 
 ### Run

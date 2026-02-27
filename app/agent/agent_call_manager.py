@@ -573,11 +573,16 @@ class AgentCallRegistry:
 agent_calls = AgentCallRegistry()
 
 
-def initiate_agent_outbound_call(to_number: str, from_number: str | None = None) -> tuple[str, str]:
+def initiate_agent_outbound_call(
+    to_number: str,
+    from_number: str | None = None,
+    device_id: str | None = None,
+) -> tuple[str, str]:
     """Create outbound Twilio call for Agent Mode."""
     call_sid, caller_id = create_outbound_call(
         to_number=to_number,
         from_number=from_number,
+        device_id=device_id,
         webhook_url=f"{PUBLIC_URL}/agent/twilio/webhook/pending",
         method="POST",
     )

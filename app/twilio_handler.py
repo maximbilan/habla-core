@@ -24,7 +24,11 @@ def _media_stream_ws_url() -> str:
     )
 
 
-def initiate_outbound_call(to_number: str, from_number: str | None = None) -> tuple[str, str]:
+def initiate_outbound_call(
+    to_number: str,
+    from_number: str | None = None,
+    device_id: str | None = None,
+) -> tuple[str, str]:
     """
     Place an outbound PSTN call via Twilio.
 
@@ -46,6 +50,7 @@ def initiate_outbound_call(to_number: str, from_number: str | None = None) -> tu
     call_sid, caller_id = create_outbound_call(
         to_number=to_number,
         from_number=from_number,
+        device_id=device_id,
         twiml=twiml_xml,
     )
     logger.info("Twilio outbound call created: sid=%s  to=%s", call_sid, to_number)

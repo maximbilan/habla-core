@@ -28,6 +28,13 @@ SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
 PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:8000")
 
 # ---------------------------------------------------------------------------
+# Habla Accounts service (shared caller-id ownership)
+# ---------------------------------------------------------------------------
+HABLA_ACCOUNTS_BASE_URL = os.getenv("HABLA_ACCOUNTS_BASE_URL", "").strip()
+HABLA_ACCOUNTS_SERVICE_TOKEN = os.getenv("HABLA_ACCOUNTS_SERVICE_TOKEN", "").strip()
+HABLA_ACCOUNTS_TIMEOUT_SECONDS = float(os.getenv("HABLA_ACCOUNTS_TIMEOUT_SECONDS", "5"))
+
+# ---------------------------------------------------------------------------
 # Request auth (iOS -> backend)
 # ---------------------------------------------------------------------------
 # Authorization token format:
