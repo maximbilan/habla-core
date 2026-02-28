@@ -73,7 +73,6 @@ class ConfirmationPrompt:
     candidate_value: str
     confidence: float
     prompt_en: str
-    prompt_es: str
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -84,7 +83,6 @@ class ConfirmationPrompt:
             "candidate_value": self.candidate_value,
             "confidence": round(self.confidence, 3),
             "prompt_en": self.prompt_en,
-            "prompt_es": self.prompt_es,
         }
 
 
@@ -356,8 +354,6 @@ class CriticalInfoTracker:
             candidate_value=candidate,
             confidence=fact.confidence,
             prompt_en=prompt_en,
-            # Keep API shape stable; localized generation can be layered later.
-            prompt_es=prompt_en,
         )
 
     def _build_translation_mismatch_prompt(
@@ -379,7 +375,6 @@ class CriticalInfoTracker:
             candidate_value=translated_item.value,
             confidence=confidence,
             prompt_en=prompt_en,
-            prompt_es=prompt_en,
         )
 
     def _build_intracall_mismatch_prompt(
@@ -400,7 +395,6 @@ class CriticalInfoTracker:
             candidate_value=current_fact.value,
             confidence=current_fact.confidence,
             prompt_en=prompt_en,
-            prompt_es=prompt_en,
         )
 
     def _looks_like_variation(self, *, fact_type: str, left: str, right: str) -> bool:
