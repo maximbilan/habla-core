@@ -23,6 +23,7 @@ from app.language_support import (
     resolve_supported_language,
     voice_id_for_language,
 )
+from app.critical_info import CriticalInfoTracker
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,7 @@ class AgentCallManager:
             "repeat_guard_triggers": 0,
             "listen_first_guidance": 0,
         }
+        self._critical_tracker = CriticalInfoTracker()
 
     def status_payload(self) -> dict:
         return {
@@ -104,6 +106,7 @@ class AgentCallManager:
                 for e in self.transcript.entries
             ],
             "quality_metrics": self._quality_metrics_payload(),
+            "verified_facts": self._critical_tracker.summary_facts(),
         }
 
     async def attach_ios_websocket(self, ws: WebSocket) -> None:
@@ -119,6 +122,8 @@ class AgentCallManager:
                     "timestamp": entry.timestamp,
                 }
             )
+
+        await self._send_verified_facts_summary()
 
     def detach_ios_websocket(self, ws: WebSocket) -> None:
         if self.ios_websocket is ws:
@@ -222,6 +227,11 @@ class AgentCallManager:
 
         entry = self.transcript.add_entry(role, text)
 
+        await self._send_critical_confirmations(
+            self._critical_tracker.observe_text(role=role, text=text)
+        )
+        await self._send_verified_facts_summary()
+
         if role == "callee":
             self._quality_metrics["callee_turns"] += 1
             await self._maybe_inject_listen_first_guidance(text)
@@ -258,6 +268,14 @@ class AgentCallManager:
                         "timestamp": entry.timestamp,
                     }
                 )
+
+                await self._send_critical_confirmations(
+                    self._critical_tracker.observe_translation_pair(
+                        source_text=text,
+                        translated_text=translated,
+                    )
+                )
+                await self._send_verified_facts_summary()
             except Exception as exc:
                 logger.error("[%s] translation failed: %s", self.call_sid, exc)
 
@@ -303,6 +321,8 @@ class AgentCallManager:
                 except Exception as exc:
                     logger.error("[%s] error closing Nova session: %s", self.call_sid, exc)
 
+            await self._send_verified_facts_summary()
+
             self.status = "ended"
             await self._send_ios({"type": "status", "status": "ended"})
 
@@ -313,6 +333,17 @@ class AgentCallManager:
             await self.ios_websocket.send_json(payload)
         except Exception:
             self.ios_websocket = None
+
+    async def _send_critical_confirmations(self, prompts) -> None:
+        for prompt in prompts:
+            await self._send_ios(prompt.to_payload())
+
+    async def _send_verified_facts_summary(self) -> None:
+        summary = self._critical_tracker.summary_payload()
+        facts = summary.get("facts", [])
+        if not facts:
+            return
+        await self._send_ios(summary)
 
     def _voice_id_for_language(self, language_code: str) -> str:
         return voice_id_for_language(language_code, self.config.voice_gender)

@@ -50,6 +50,7 @@ class NovaSonicSession:
         input_sample_rate: int = 16000,
         output_sample_rate: int = 24000,
         on_audio_output: Optional[Callable[[bytes], Awaitable[None]]] = None,
+        on_text_output: Optional[Callable[[str], Awaitable[None]]] = None,
     ):
         self.session_id = session_id
         self.system_prompt = system_prompt
@@ -74,6 +75,7 @@ class NovaSonicSession:
 
         self._response_task: Optional[asyncio.Task] = None
         self._on_audio_output = on_audio_output
+        self._on_text_output = on_text_output
         self._died_unexpectedly = False
 
     # ------------------------------------------------------------------
@@ -284,6 +286,11 @@ class NovaSonicSession:
         elif "textOutput" in event:
             text = event["textOutput"].get("content", "")
             logger.debug("[%s] transcript: %s", self.session_id, text[:120])
+            if self._on_text_output and text:
+                try:
+                    await self._on_text_output(text)
+                except Exception as e:
+                    logger.error("text output callback error [%s]: %s", self.session_id, e)
 
         # ── content lifecycle
         elif "contentStart" in event:

@@ -37,6 +37,7 @@ from app.language_support import (
     build_translation_system_prompt,
     voice_id_for_language,
 )
+from app.critical_info import CriticalInfoTracker
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ class TranslationBridge:
 
         self._tasks: list[asyncio.Task] = []
         self._closed = False
+        self._critical_tracker = CriticalInfoTracker()
 
     # ------------------------------------------------------------------
     # Session A — source ➜ target  (iOS mic → phone speaker)
@@ -86,6 +88,7 @@ class TranslationBridge:
             voice_id=self._voice_id_for_language(self.target_language),
             input_sample_rate=INPUT_SAMPLE_RATE,
             output_sample_rate=OUTPUT_SAMPLE_RATE,
+            on_text_output=self._handle_session_a_text,
         )
         await self.session_a.start()
 
@@ -121,6 +124,7 @@ class TranslationBridge:
             voice_id=self._voice_id_for_language(self.source_language),
             input_sample_rate=INPUT_SAMPLE_RATE,
             output_sample_rate=OUTPUT_SAMPLE_RATE,
+            on_text_output=self._handle_session_b_text,
         )
         await self.session_b.start()
 
@@ -229,6 +233,36 @@ class TranslationBridge:
         except Exception as e:
             logger.error("[%s] route B→iOS error: %s", self.call_sid, e)
 
+    async def _handle_session_a_text(self, text: str) -> None:
+        await self._send_ios_event({"type": "translation", "text": text, "is_final": True})
+        await self._process_critical_text(role="session_a_output", text=text)
+
+    async def _handle_session_b_text(self, text: str) -> None:
+        await self._send_ios_event({"type": "transcription", "text": text, "is_final": True})
+        await self._process_critical_text(role="session_b_output", text=text)
+
+    async def _process_critical_text(self, *, role: str, text: str) -> None:
+        confirmations = self._critical_tracker.observe_text(role=role, text=text)
+        for prompt in confirmations:
+            await self._send_ios_event(prompt.to_payload())
+
+        await self._send_verified_summary()
+
+    async def _send_verified_summary(self) -> None:
+        summary = self._critical_tracker.summary_payload()
+        facts = summary.get("facts", [])
+        if not facts:
+            return
+        await self._send_ios_event(summary)
+
+    async def _send_ios_event(self, payload: dict[str, object]) -> None:
+        if not self.ios_ws:
+            return
+        try:
+            await self.ios_ws.send_text(json.dumps(payload, separators=(",", ":"), ensure_ascii=True))
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -268,6 +302,7 @@ class TranslationBridge:
                 voice_id=self._voice_id_for_language(self.target_language),
                 input_sample_rate=INPUT_SAMPLE_RATE,
                 output_sample_rate=OUTPUT_SAMPLE_RATE,
+                on_text_output=self._handle_session_a_text,
             )
             await self.session_a.start()
             logger.info(
@@ -298,6 +333,7 @@ class TranslationBridge:
                 voice_id=self._voice_id_for_language(self.source_language),
                 input_sample_rate=INPUT_SAMPLE_RATE,
                 output_sample_rate=OUTPUT_SAMPLE_RATE,
+                on_text_output=self._handle_session_b_text,
             )
             await self.session_b.start()
             logger.info(
@@ -321,6 +357,8 @@ class TranslationBridge:
             return
         self._closed = True
         logger.info("[%s] Shutting down translation bridge", self.call_sid)
+
+        await self._send_verified_summary()
 
         for task in self._tasks:
             if not task.done():
