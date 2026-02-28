@@ -127,7 +127,8 @@ def build_translation_system_prompt(source_language: str, target_language: str) 
         "never mention delays or processing time, and never provide policy/disclaimer "
         "messages. Do not speak until you have heard actual user speech to translate. "
         "Only output the translation of what was said. Maintain the same tone and intent. "
-        "If the user pauses, wait for them to continue."
+        "Translate short utterances promptly and continuously as speech arrives. "
+        "Do not wait for long pauses or complete paragraphs before responding."
     )
 
 
