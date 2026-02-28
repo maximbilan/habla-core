@@ -187,7 +187,6 @@ class GoalTracker:
             if name in self.required_fields
         }
         summary_en = self._summary_en(fields_map=fields_map, missing_fields=missing)
-        summary_es = summary_en
 
         return {
             "type": "goal_result_summary",
@@ -198,7 +197,6 @@ class GoalTracker:
             "completion_rate": round(self.completion_rate(), 3),
             "success": success,
             "summary_en": summary_en,
-            "summary_es": summary_es,
             "result": {
                 "objective": self.objective,
                 "required_fields": self.required_fields,
