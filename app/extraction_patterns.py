@@ -1,8 +1,4 @@
-"""Shared keyword catalogs for multilingual extraction.
-
-Canonical field identifiers remain English (date/time/location/etc.) while
-matching supports multiple languages for better robustness.
-"""
+"""Shared keyword catalogs for English canonical extraction."""
 
 from __future__ import annotations
 

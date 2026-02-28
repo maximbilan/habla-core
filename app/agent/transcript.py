@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TranscriptEntry:
     role: str
-    text_es: str
+    text_original: str
     text_en: str | None = None
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -58,8 +58,8 @@ class TranscriptService:
         self._bedrock = BedrockRuntimeClient(config=config)
         return self._bedrock
 
-    def add_entry(self, role: str, text_es: str) -> TranscriptEntry:
-        entry = TranscriptEntry(role=role, text_es=text_es)
+    def add_entry(self, role: str, text_original: str) -> TranscriptEntry:
+        entry = TranscriptEntry(role=role, text_original=text_original)
         self.entries.append(entry)
         return entry
 

@@ -113,7 +113,7 @@ class AgentCallManager:
             "transcript": [
                 {
                     "role": e.role,
-                    "text_es": e.text_es,
+                    "text_original": e.text_original,
                     "text_en": e.text_en,
                     "timestamp": e.timestamp,
                 }
@@ -132,7 +132,7 @@ class AgentCallManager:
                 {
                     "type": "transcript",
                     "role": entry.role,
-                    "text_es": entry.text_es,
+                    "text_original": entry.text_original,
                     "text_en": entry.text_en,
                     "timestamp": entry.timestamp,
                 }
@@ -229,8 +229,8 @@ class AgentCallManager:
     async def handle_nova_audio(self, audio_data: bytes) -> None:
         await self.bridge.forward_nova_audio_to_twilio(audio_data)
 
-    async def handle_transcript(self, role: str, text_es: str) -> None:
-        text = text_es.strip()
+    async def handle_transcript(self, role: str, text_original: str) -> None:
+        text = text_original.strip()
         if not text:
             return
 
@@ -271,7 +271,7 @@ class AgentCallManager:
             {
                 "type": "transcript",
                 "role": role,
-                "text_es": text,
+                "text_original": text,
                 "text_en": None,
                 "timestamp": entry.timestamp,
             }
@@ -285,7 +285,7 @@ class AgentCallManager:
                     {
                         "type": "transcript_update",
                         "role": role,
-                        "text_es": text,
+                        "text_original": text,
                         "text_en": translated,
                         "timestamp": entry.timestamp,
                     }
