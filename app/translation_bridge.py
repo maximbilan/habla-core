@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 QUEUE_READ_TIMEOUT = 1.0  # seconds
 MAX_SESSION_RETRIES = 3
 RETRY_DELAY = 1.0  # seconds
+AUDIO_INPUT_QUEUE_MAX_CHUNKS = 24
+AUDIO_INPUT_QUEUE_TIMEOUT = 0.2
 
 
 class TranslationBridge:
@@ -72,6 +74,12 @@ class TranslationBridge:
         self._closed = False
         self._critical_tracker = CriticalInfoTracker()
         self._last_emitted_text_by_role: dict[str, str] = {}
+        self._session_a_input_queue: asyncio.Queue[bytes] = asyncio.Queue(
+            maxsize=AUDIO_INPUT_QUEUE_MAX_CHUNKS
+        )
+        self._session_b_input_queue: asyncio.Queue[bytes] = asyncio.Queue(
+            maxsize=AUDIO_INPUT_QUEUE_MAX_CHUNKS
+        )
 
     # ------------------------------------------------------------------
     # Session A — source ➜ target  (iOS mic → phone speaker)
@@ -93,6 +101,12 @@ class TranslationBridge:
         )
         await self.session_a.start()
 
+        self._tasks.append(
+            asyncio.create_task(
+                self._pump_session_a_input(),
+                name=f"{self.call_sid}-ios→a-input",
+            )
+        )
         self._tasks.append(
             asyncio.create_task(
                 self._route_a_to_twilio(),
@@ -131,6 +145,12 @@ class TranslationBridge:
 
         self._tasks.append(
             asyncio.create_task(
+                self._pump_session_b_input(),
+                name=f"{self.call_sid}-twilio→b-input",
+            )
+        )
+        self._tasks.append(
+            asyncio.create_task(
                 self._route_b_to_ios(),
                 name=f"{self.call_sid}-b→ios",
             )
@@ -149,7 +169,7 @@ class TranslationBridge:
     async def handle_ios_audio(self, pcm_16k: bytes) -> None:
         """iOS app sent a PCM 16 kHz chunk — forward to Session A."""
         if self.session_a and self.session_a.is_active:
-            await self.session_a.send_audio(pcm_16k)
+            self._enqueue_input_audio(self._session_a_input_queue, pcm_16k)
 
     async def handle_twilio_media(self, payload: str) -> None:
         """Twilio sent a base64 mulaw chunk — decode, resample, forward to Session B."""
@@ -157,7 +177,7 @@ class TranslationBridge:
             return
         mulaw_bytes = decode_twilio_media(payload)
         pcm_16k = mulaw_8k_to_pcm_16k(mulaw_bytes)
-        await self.session_b.send_audio(pcm_16k)
+        self._enqueue_input_audio(self._session_b_input_queue, pcm_16k)
 
     # ------------------------------------------------------------------
     # Routing coroutines (run as background tasks)
@@ -200,6 +220,38 @@ class TranslationBridge:
             pass
         except Exception as e:
             logger.error("[%s] route A→Twilio error: %s", self.call_sid, e)
+
+    async def _pump_session_a_input(self) -> None:
+        try:
+            while not self._closed:
+                if not self._is_running(self.session_a):
+                    await asyncio.sleep(0.02)
+                    continue
+
+                chunk = await self._read_input_chunk(self._session_a_input_queue)
+                if chunk is None:
+                    continue
+                await self.session_a.send_audio(chunk)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("[%s] route iOS→A error: %s", self.call_sid, e)
+
+    async def _pump_session_b_input(self) -> None:
+        try:
+            while not self._closed:
+                if not self._is_running(self.session_b):
+                    await asyncio.sleep(0.02)
+                    continue
+
+                chunk = await self._read_input_chunk(self._session_b_input_queue)
+                if chunk is None:
+                    continue
+                await self.session_b.send_audio(chunk)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("[%s] route Twilio→B error: %s", self.call_sid, e)
 
     async def _route_b_to_ios(self) -> None:
         """Drain Session B output queue → resample → send to iOS WS."""
@@ -305,6 +357,25 @@ class TranslationBridge:
             )
         except asyncio.TimeoutError:
             return None
+
+    async def _read_input_chunk(self, queue: asyncio.Queue[bytes]) -> Optional[bytes]:
+        try:
+            return await asyncio.wait_for(queue.get(), timeout=AUDIO_INPUT_QUEUE_TIMEOUT)
+        except asyncio.TimeoutError:
+            return None
+
+    def _enqueue_input_audio(self, queue: asyncio.Queue[bytes], chunk: bytes) -> None:
+        try:
+            queue.put_nowait(chunk)
+        except asyncio.QueueFull:
+            try:
+                _ = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                queue.put_nowait(chunk)
+            except asyncio.QueueFull:
+                pass
 
     def _voice_id_for_language(self, language_code: str) -> str:
         return voice_id_for_language(language_code, self.voice_gender)
