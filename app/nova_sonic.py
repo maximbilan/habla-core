@@ -287,10 +287,10 @@ class NovaSonicSession:
             text = event["textOutput"].get("content", "")
             logger.debug("[%s] transcript: %s", self.session_id, text[:120])
             if self._on_text_output and text:
-                try:
-                    await self._on_text_output(text)
-                except Exception as e:
-                    logger.error("text output callback error [%s]: %s", self.session_id, e)
+                asyncio.create_task(
+                    self._dispatch_text_output(text),
+                    name=f"nova-text-{self.session_id}",
+                )
 
         # ── content lifecycle
         elif "contentStart" in event:
@@ -308,6 +308,14 @@ class NovaSonicSession:
             reason = event["contentEnd"].get("stopReason", "")
             if reason == "INTERRUPTED":
                 logger.info("[%s] barge-in detected", self.session_id)
+
+    async def _dispatch_text_output(self, text: str) -> None:
+        if not self._on_text_output:
+            return
+        try:
+            await self._on_text_output(text)
+        except Exception as e:
+            logger.error("text output callback error [%s]: %s", self.session_id, e)
 
     # ------------------------------------------------------------------
     # Shutdown

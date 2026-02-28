@@ -147,6 +147,13 @@ def _should_process_agent_media_track(track: str | None) -> bool:
     return normalized not in {"outbound", "outbound_track"}
 
 
+def _should_process_translation_media_track(track: str | None) -> bool:
+    if not track:
+        return True
+    normalized = track.strip().lower()
+    return normalized not in {"outbound", "outbound_track"}
+
+
 # ===================================================================
 # REST endpoints
 # ===================================================================
@@ -442,7 +449,13 @@ async def twilio_media_stream(ws: WebSocket):
                     continue
                 state = call_manager.get_call(call_sid)
                 if state and state.bridge:
-                    payload = data["media"]["payload"]
+                    media = data.get("media", {})
+                    track = media.get("track")
+                    if not _should_process_translation_media_track(track):
+                        continue
+                    payload = media.get("payload")
+                    if not payload:
+                        continue
                     await state.bridge.handle_twilio_media(payload)
 
             # ── stream stop
