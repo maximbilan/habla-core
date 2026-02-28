@@ -40,19 +40,6 @@ MONTH_KEYWORDS = (
     "nov",
     "december",
     "dec",
-    "enero",
-    "febrero",
-    "marzo",
-    "abril",
-    "mayo",
-    "junio",
-    "julio",
-    "agosto",
-    "septiembre",
-    "setiembre",
-    "octubre",
-    "noviembre",
-    "diciembre",
 )
 
 WEEKDAY_KEYWORDS = (
@@ -63,15 +50,6 @@ WEEKDAY_KEYWORDS = (
     "friday",
     "saturday",
     "sunday",
-    "lunes",
-    "martes",
-    "miercoles",
-    "miércoles",
-    "jueves",
-    "viernes",
-    "sabado",
-    "sábado",
-    "domingo",
 )
 
 ADDRESS_SUFFIX_KEYWORDS = (
@@ -98,11 +76,6 @@ ADDRESS_SUFFIX_KEYWORDS = (
     "ct",
     "place",
     "pl",
-    "calle",
-    "avenida",
-    "av",
-    "camino",
-    "paseo",
 )
 
 NAME_INTRO_KEYWORDS = (
@@ -110,9 +83,6 @@ NAME_INTRO_KEYWORDS = (
     "this is",
     "i am",
     "i'm",
-    "me llamo",
-    "mi nombre es",
-    "soy",
 )
 
 LOCATION_PREFIX_KEYWORDS = (
@@ -120,9 +90,6 @@ LOCATION_PREFIX_KEYWORDS = (
     "located at",
     "meet at",
     "location is",
-    "direccion es",
-    "ubicado en",
-    "ubicacion es",
 )
 
 NEXT_STEP_PREFIX_KEYWORDS = (
@@ -130,10 +97,6 @@ NEXT_STEP_PREFIX_KEYWORDS = (
     "you should",
     "please",
     "the process is",
-    "siguiente paso es",
-    "debes",
-    "debe",
-    "por favor",
 )
 
 MONTH_PATTERN = rf"(?:{_alternation(MONTH_KEYWORDS)})"

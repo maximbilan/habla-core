@@ -50,16 +50,6 @@ _FIELD_LABEL_EN: dict[str, str] = {
     "name": "name",
 }
 
-_FIELD_LABEL_ES: dict[str, str] = {
-    "date": "fecha",
-    "time": "hora",
-    "location": "ubicacion/direccion",
-    "price": "precio",
-    "next_step": "siguiente paso",
-    "phone_number": "numero de telefono",
-    "name": "nombre",
-}
-
 
 @dataclass(slots=True)
 class GoalFieldState:
@@ -197,7 +187,7 @@ class GoalTracker:
             if name in self.required_fields
         }
         summary_en = self._summary_en(fields_map=fields_map, missing_fields=missing)
-        summary_es = self._summary_es(fields_map=fields_map, missing_fields=missing)
+        summary_es = summary_en
 
         return {
             "type": "goal_result_summary",
@@ -232,21 +222,6 @@ class GoalTracker:
         )
         objective = self.objective or "Task completion"
         return f"Objective: {objective}. Captured: {captured_text}. Missing: {missing_text}."
-
-    def _summary_es(self, *, fields_map: dict[str, dict[str, object]], missing_fields: list[str]) -> str:
-        captured_items = [
-            f"{_FIELD_LABEL_ES.get(name, name)}: {fields_map[name]['value']}"
-            for name in self.required_fields
-            if name in fields_map
-        ]
-        captured_text = ", ".join(captured_items) if captured_items else "ninguno"
-        missing_text = (
-            ", ".join(_FIELD_LABEL_ES.get(name, name) for name in missing_fields)
-            if missing_fields
-            else "ninguno"
-        )
-        objective = self.objective or "Completar la tarea"
-        return f"Objetivo: {objective}. Capturado: {captured_text}. Faltante: {missing_text}."
 
     def _upsert_field(self, *, field_name: str, value: str, confidence: float, role: str) -> bool:
         new_value = value.strip()

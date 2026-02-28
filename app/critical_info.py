@@ -30,14 +30,6 @@ _FACT_LABELS_EN = {
     FACT_TYPE_MONEY: "money amount",
 }
 
-_FACT_LABELS_ES = {
-    FACT_TYPE_NAME: "nombre",
-    FACT_TYPE_PHONE: "numero de telefono",
-    FACT_TYPE_DATE: "fecha",
-    FACT_TYPE_ADDRESS: "direccion",
-    FACT_TYPE_MONEY: "monto",
-}
-
 _PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\d\s\-()]{7,}\d)(?!\w)")
 _DATE_SLASH_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", re.IGNORECASE)
 _DATE_MONTH_LEADING_RE = re.compile(
@@ -45,7 +37,7 @@ _DATE_MONTH_LEADING_RE = re.compile(
     re.IGNORECASE,
 )
 _DATE_DAY_LEADING_RE = re.compile(
-    rf"\b\d{{1,2}}\s+de\s+{MONTH_PATTERN}(?:\s+de\s+\d{{2,4}})?\b",
+    rf"\b\d{{1,2}}\s+(?:of\s+)?{MONTH_PATTERN}(?:,?\s+\d{{2,4}})?\b",
     re.IGNORECASE,
 )
 _MONEY_RE = re.compile(
@@ -355,16 +347,17 @@ class CriticalInfoTracker:
 
     def _build_low_confidence_prompt(self, fact: DetectedFact) -> ConfirmationPrompt:
         label_en = _FACT_LABELS_EN.get(fact.fact_type, fact.fact_type)
-        label_es = _FACT_LABELS_ES.get(fact.fact_type, fact.fact_type)
         candidate = fact.value
+        prompt_en = f"Please confirm the {label_en}: '{candidate}'."
         return ConfirmationPrompt(
             fact_type=fact.fact_type,
             reason="low_confidence",
             source_value=None,
             candidate_value=candidate,
             confidence=fact.confidence,
-            prompt_en=f"Please confirm the {label_en}: '{candidate}'.",
-            prompt_es=f"Por favor confirma el/la {label_es}: '{candidate}'.",
+            prompt_en=prompt_en,
+            # Keep API shape stable; localized generation can be layered later.
+            prompt_es=prompt_en,
         )
 
     def _build_translation_mismatch_prompt(
@@ -374,22 +367,19 @@ class CriticalInfoTracker:
         translated_item: DetectedFact,
     ) -> ConfirmationPrompt:
         label_en = _FACT_LABELS_EN.get(source_item.fact_type, source_item.fact_type)
-        label_es = _FACT_LABELS_ES.get(source_item.fact_type, source_item.fact_type)
         confidence = min(source_item.confidence, translated_item.confidence)
+        prompt_en = (
+            f"I heard the {label_en} as '{source_item.value}', "
+            f"but translation says '{translated_item.value}'. Which is correct?"
+        )
         return ConfirmationPrompt(
             fact_type=source_item.fact_type,
             reason="value_changed_in_translation",
             source_value=source_item.value,
             candidate_value=translated_item.value,
             confidence=confidence,
-            prompt_en=(
-                f"I heard the {label_en} as '{source_item.value}', "
-                f"but translation says '{translated_item.value}'. Which is correct?"
-            ),
-            prompt_es=(
-                f"Escuche el/la {label_es} como '{source_item.value}', "
-                f"pero la traduccion dice '{translated_item.value}'. Cual es correcto?"
-            ),
+            prompt_en=prompt_en,
+            prompt_es=prompt_en,
         )
 
     def _build_intracall_mismatch_prompt(
@@ -399,21 +389,18 @@ class CriticalInfoTracker:
         current_fact: DetectedFact,
     ) -> ConfirmationPrompt:
         label_en = _FACT_LABELS_EN.get(current_fact.fact_type, current_fact.fact_type)
-        label_es = _FACT_LABELS_ES.get(current_fact.fact_type, current_fact.fact_type)
+        prompt_en = (
+            f"I previously heard the {label_en} as '{previous_value}', "
+            f"and now I heard '{current_fact.value}'. Please confirm."
+        )
         return ConfirmationPrompt(
             fact_type=current_fact.fact_type,
             reason="value_changed_in_call",
             source_value=previous_value,
             candidate_value=current_fact.value,
             confidence=current_fact.confidence,
-            prompt_en=(
-                f"I previously heard the {label_en} as '{previous_value}', "
-                f"and now I heard '{current_fact.value}'. Please confirm."
-            ),
-            prompt_es=(
-                f"Antes escuche el/la {label_es} como '{previous_value}', "
-                f"y ahora escuche '{current_fact.value}'. Por favor confirma."
-            ),
+            prompt_en=prompt_en,
+            prompt_es=prompt_en,
         )
 
     def _looks_like_variation(self, *, fact_type: str, left: str, right: str) -> bool:
