@@ -44,11 +44,8 @@ CONVERSATION GOALS:
 - In each new turn, respond directly to the callee's latest point before moving forward
 - If you don't understand something, ask for clarification briefly and politely
 - If asked something you cannot answer, say you will confirm with {user_name} and get back to them
-- When the goal is completed or when told to end, close the call politely
+- When the request is completed or when told to end, close the call politely
 - Do NOT reveal that you are an AI unless directly asked. If asked, answer honestly that you are an AI assistant calling on behalf of {user_name}
-
-TASK COMPLETION SCHEMA:
-{goal_schema_block}
 
 The user may send additional instructions during the call. Incorporate them naturally into the ongoing conversation without abrupt topic changes."""
 
@@ -58,27 +55,11 @@ def build_agent_prompt(
     user_name: str,
     callee_language_code: str,
     callee_language_label: str,
-    goal_objective: str = "",
-    goal_required_fields: list[str] | None = None,
 ) -> str:
     """Build the per-call system prompt."""
-    normalized_required_fields = [field.strip() for field in (goal_required_fields or []) if field.strip()]
-    if normalized_required_fields:
-        required_fields_text = ", ".join(normalized_required_fields)
-        objective_text = goal_objective.strip() or user_prompt.strip()
-        goal_schema_block = (
-            f"- Objective: {objective_text}\n"
-            f"- Required fields before call end: {required_fields_text}\n"
-            "- If any required field is missing or uncertain near closing, ask targeted follow-up questions.\n"
-            "- Before saying goodbye, briefly confirm captured required fields."
-        )
-    else:
-        goal_schema_block = "- No strict schema provided; still aim to complete the caller request clearly."
-
     return AGENT_SYSTEM_PROMPT.format(
         user_prompt=user_prompt.strip(),
         user_name=user_name.strip() or "the caller",
         callee_language_code=callee_language_code.strip(),
         callee_language_label=callee_language_label.strip(),
-        goal_schema_block=goal_schema_block,
     )
