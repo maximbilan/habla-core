@@ -100,8 +100,10 @@ class AgentCallManager:
             required_fields=normalize_goal_required_fields(config.goal_required_fields),
         )
         self._goal_followup_attempts = 0
+        self._last_goal_followup_signature = ""
         self._last_goal_progress_signature = ""
         self._goal_result_sent = False
+        self._translation_tasks: set[asyncio.Task] = set()
 
     def status_payload(self) -> dict:
         goal_result = self._goal_tracker.result_payload() if self._goal_tracker.enabled else None
@@ -304,7 +306,7 @@ class AgentCallManager:
             except Exception as exc:
                 logger.error("[%s] translation failed: %s", self.call_sid, exc)
 
-        asyncio.create_task(_translate_and_emit())
+        self._track_translation_task(asyncio.create_task(_translate_and_emit()))
 
         if role == "agent" and self._has_callee_uttered and self._should_auto_end_after_agent_turn(text):
             if await self._request_goal_followup_if_needed():
@@ -351,6 +353,7 @@ class AgentCallManager:
                 except Exception as exc:
                     logger.error("[%s] error closing Nova session: %s", self.call_sid, exc)
 
+            await self._wait_for_translation_tasks(timeout=1.2)
             await self._send_verified_facts_summary()
             await self._send_goal_progress(force=True)
             await self._send_goal_result_summary(force=True)
@@ -402,19 +405,40 @@ class AgentCallManager:
     async def _request_goal_followup_if_needed(self) -> bool:
         if not self._goal_tracker.enabled:
             return False
+        await self._wait_for_translation_tasks(timeout=0.6)
+
         if self._goal_followup_attempts >= MAX_GOAL_FOLLOWUP_ATTEMPTS:
             return False
         if not self._goal_tracker.needs_follow_up():
+            return False
+
+        missing_signature = "|".join(self._goal_tracker.missing_fields())
+        if self._last_goal_followup_signature == missing_signature:
             return False
 
         instruction = self._goal_tracker.build_follow_up_instruction()
         if not instruction:
             return False
 
+        self._last_goal_followup_signature = missing_signature
         self._goal_followup_attempts += 1
         await self._inject_runtime_instruction(instruction, force=True)
         await self._send_goal_progress(force=True)
         return True
+
+    def _track_translation_task(self, task: asyncio.Task) -> None:
+        self._translation_tasks.add(task)
+        task.add_done_callback(lambda done: self._translation_tasks.discard(done))
+
+    async def _wait_for_translation_tasks(self, *, timeout: float) -> None:
+        if not self._translation_tasks:
+            return
+        pending = [task for task in self._translation_tasks if not task.done()]
+        if not pending:
+            return
+        done, _ = await asyncio.wait(pending, timeout=timeout)
+        for task in done:
+            self._translation_tasks.discard(task)
 
     def _voice_id_for_language(self, language_code: str) -> str:
         return voice_id_for_language(language_code, self.config.voice_gender)
