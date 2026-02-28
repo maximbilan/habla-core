@@ -7,13 +7,16 @@ import re
 import unicodedata
 from typing import Iterable
 
-GOAL_CONFIDENCE_THRESHOLD = 0.67
-
-_MONTH_PATTERN = (
-    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
-    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
-    r"nov(?:ember)?|dec(?:ember)?)"
+from app.extraction_patterns import (
+    ADDRESS_SUFFIX_PATTERN,
+    LOCATION_PREFIX_PATTERN,
+    MONTH_PATTERN,
+    NAME_INTRO_PATTERN,
+    NEXT_STEP_PREFIX_PATTERN,
+    WEEKDAY_PATTERN,
 )
+
+GOAL_CONFIDENCE_THRESHOLD = 0.67
 
 _FIELD_ALIASES: dict[str, str] = {
     "appointment_date": "date",
@@ -325,19 +328,14 @@ def _extract_date(text: str) -> tuple[str, float] | None:
         return numeric.group(0), 0.81
 
     month_name = re.search(
-        rf"\b{_MONTH_PATTERN}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,\s*\d{{2,4}})?\b",
+        rf"\b{MONTH_PATTERN}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,\s*\d{{2,4}})?\b",
         text,
         flags=re.IGNORECASE,
     )
     if month_name:
         return month_name.group(0), 0.82
 
-    weekday = re.search(
-        r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|"
-        r"lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\b",
-        text,
-        flags=re.IGNORECASE,
-    )
+    weekday = re.search(rf"\b{WEEKDAY_PATTERN}\b", text, flags=re.IGNORECASE)
     if weekday:
         return weekday.group(0), 0.68
 
@@ -362,19 +360,14 @@ def _extract_time(text: str) -> tuple[str, float] | None:
 
 def _extract_location(text: str, lowered: str) -> tuple[str, float] | None:
     street = re.search(
-        r"\b\d{1,5}\s+[A-Za-z0-9.\- ]+\s(?:street|st|avenue|ave|road|rd|boulevard|blvd|"
-        r"lane|ln|drive|dr|way|plaza|plz|suite|ste|apt|apartment)\b",
+        rf"\b\d{{1,5}}\s+[A-Za-z0-9.\- ]+\s{ADDRESS_SUFFIX_PATTERN}\b",
         text,
         flags=re.IGNORECASE,
     )
     if street:
         return street.group(0).strip(), 0.83
 
-    keyword = re.search(
-        r"(?:address is|located at|meet at|location is|direccion es|ubicado en|ubicacion es)\s*[:\-]?\s*([^,.!?]+)",
-        text,
-        flags=re.IGNORECASE,
-    )
+    keyword = re.search(rf"{LOCATION_PREFIX_PATTERN}\s*[:\-]?\s*([^,.!?]+)", text, flags=re.IGNORECASE)
     if keyword:
         return keyword.group(1).strip(), 0.75
 
@@ -403,12 +396,7 @@ def _extract_price(text: str) -> tuple[str, float] | None:
 
 
 def _extract_next_step(text: str, lowered: str) -> tuple[str, float] | None:
-    keyword = re.search(
-        r"(?:next step is|you should|please|the process is|siguiente paso es|debes|debe|"
-        r"por favor)\s*[:\-]?\s*([^.!?]+)",
-        text,
-        flags=re.IGNORECASE,
-    )
+    keyword = re.search(rf"{NEXT_STEP_PREFIX_PATTERN}\s*[:\-]?\s*([^.!?]+)", text, flags=re.IGNORECASE)
     if keyword:
         value = keyword.group(1).strip()
         if len(value) >= 6:
@@ -430,11 +418,7 @@ def _extract_phone(text: str) -> tuple[str, float] | None:
 
 
 def _extract_name(text: str, lowered: str) -> tuple[str, float] | None:
-    intro = re.search(
-        r"(?:my name is|this is|i am|soy|mi nombre es)\s+([A-ZÁÉÍÓÚÑ][^\d,.!?]{1,60})",
-        text,
-        flags=re.IGNORECASE,
-    )
+    intro = re.search(rf"{NAME_INTRO_PATTERN}\s+([A-ZÁÉÍÓÚÑ][^\d,.!?]{1,60})", text, flags=re.IGNORECASE)
     if intro:
         value = intro.group(1).strip()
         if len(value.split()) <= 5:

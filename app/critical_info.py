@@ -6,6 +6,8 @@ import re
 import time
 from dataclasses import dataclass
 
+from app.extraction_patterns import ADDRESS_SUFFIX_PATTERN, MONTH_PATTERN, NAME_INTRO_PATTERN
+
 FACT_TYPE_NAME = "name"
 FACT_TYPE_PHONE = "phone_number"
 FACT_TYPE_DATE = "date"
@@ -36,21 +38,14 @@ _FACT_LABELS_ES = {
     FACT_TYPE_MONEY: "monto",
 }
 
-_MONTH_PATTERN = (
-    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
-    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|"
-    r"dec(?:ember)?|enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
-    r"septiembre|setiembre|octubre|noviembre|diciembre)"
-)
-
 _PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\d\s\-()]{7,}\d)(?!\w)")
 _DATE_SLASH_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", re.IGNORECASE)
 _DATE_MONTH_LEADING_RE = re.compile(
-    rf"\b{_MONTH_PATTERN}\s+\d{{1,2}}(?:,?\s+\d{{2,4}})?\b",
+    rf"\b{MONTH_PATTERN}\s+\d{{1,2}}(?:,?\s+\d{{2,4}})?\b",
     re.IGNORECASE,
 )
 _DATE_DAY_LEADING_RE = re.compile(
-    rf"\b\d{{1,2}}\s+de\s+{_MONTH_PATTERN}(?:\s+de\s+\d{{2,4}})?\b",
+    rf"\b\d{{1,2}}\s+de\s+{MONTH_PATTERN}(?:\s+de\s+\d{{2,4}})?\b",
     re.IGNORECASE,
 )
 _MONEY_RE = re.compile(
@@ -60,12 +55,11 @@ _MONEY_RE = re.compile(
 )
 _ADDRESS_RE = re.compile(
     r"\b\d{1,5}\s+[A-Za-z0-9\s\-.]{2,60}\s"
-    r"(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|"
-    r"court|ct|place|pl|way|calle|avenida|av|camino|paseo)\b",
+    rf"{ADDRESS_SUFFIX_PATTERN}\b",
     re.IGNORECASE,
 )
 _NAME_RE = re.compile(
-    r"\b(?:my name is|this is|i am|i'm|me llamo|mi nombre es|soy)\s+"
+    rf"\b{NAME_INTRO_PATTERN}\s+"
     r"([A-Za-z\u00C0-\u017F]+(?:\s+[A-Za-z\u00C0-\u017F]+){0,3})\b",
     re.IGNORECASE,
 )
@@ -509,7 +503,7 @@ class CriticalInfoTracker:
         lowered = value.lower()
         if re.search(r"\d{4}", lowered):
             return 0.91
-        if re.search(_MONTH_PATTERN, lowered, re.IGNORECASE):
+        if re.search(MONTH_PATTERN, lowered, re.IGNORECASE):
             return 0.88
         return 0.8
 
