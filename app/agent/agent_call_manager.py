@@ -7,10 +7,11 @@ import json
 import logging
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fastapi import WebSocket
 
 from app.agent.agent_bridge import AgentBridge
+from app.agent.goal_tracker import GoalTracker, normalize_goal_required_fields
 from app.agent.agent_nova_session import AgentNovaSession
 from app.agent.prompts import build_agent_prompt
 from app.agent.transcript import TranscriptService
@@ -36,6 +37,7 @@ RUNTIME_COACHING_COOLDOWN_SECONDS = 0.75
 MAX_RECENT_AGENT_TURNS = 6
 AGENT_REPETITION_WINDOW = 4
 AGENT_REPETITION_SIMILARITY_THRESHOLD = 0.84
+MAX_GOAL_FOLLOWUP_ATTEMPTS = 2
 
 
 @dataclass
@@ -46,6 +48,8 @@ class AgentCallConfig:
     user_name: str
     language: str = DEFAULT_TARGET_LANGUAGE
     voice_gender: str | None = None
+    goal_objective: str = ""
+    goal_required_fields: list[str] = field(default_factory=list)
 
 
 class AgentCallManager:
@@ -91,8 +95,16 @@ class AgentCallManager:
             "listen_first_guidance": 0,
         }
         self._critical_tracker = CriticalInfoTracker()
+        self._goal_tracker = GoalTracker(
+            objective=config.goal_objective or config.prompt,
+            required_fields=normalize_goal_required_fields(config.goal_required_fields),
+        )
+        self._goal_followup_attempts = 0
+        self._last_goal_progress_signature = ""
+        self._goal_result_sent = False
 
     def status_payload(self) -> dict:
+        goal_result = self._goal_tracker.result_payload() if self._goal_tracker.enabled else None
         return {
             "call_sid": self.call_sid,
             "status": self.status,
@@ -107,6 +119,7 @@ class AgentCallManager:
             ],
             "quality_metrics": self._quality_metrics_payload(),
             "verified_facts": self._critical_tracker.summary_facts(),
+            "goal_result": goal_result,
         }
 
     async def attach_ios_websocket(self, ws: WebSocket) -> None:
@@ -124,6 +137,9 @@ class AgentCallManager:
             )
 
         await self._send_verified_facts_summary()
+        await self._send_goal_progress(force=True)
+        if self.status in {"ended", "failed"}:
+            await self._send_goal_result_summary(force=True)
 
     def detach_ios_websocket(self, ws: WebSocket) -> None:
         if self.ios_websocket is ws:
@@ -143,6 +159,8 @@ class AgentCallManager:
             self.config.user_name,
             callee_language_code=self._callee_language.code,
             callee_language_label=self._callee_language.label,
+            goal_objective=self.config.goal_objective,
+            goal_required_fields=self.config.goal_required_fields,
         )
 
         self.nova_session = AgentNovaSession(
@@ -231,6 +249,8 @@ class AgentCallManager:
             self._critical_tracker.observe_text(role=role, text=text)
         )
         await self._send_verified_facts_summary()
+        self._goal_tracker.observe_text(role=role, text=text)
+        await self._send_goal_progress()
 
         if role == "callee":
             self._quality_metrics["callee_turns"] += 1
@@ -276,12 +296,19 @@ class AgentCallManager:
                     )
                 )
                 await self._send_verified_facts_summary()
+                self._goal_tracker.observe_translation_pair(
+                    source_text=text,
+                    translated_text=translated,
+                )
+                await self._send_goal_progress()
             except Exception as exc:
                 logger.error("[%s] translation failed: %s", self.call_sid, exc)
 
         asyncio.create_task(_translate_and_emit())
 
         if role == "agent" and self._has_callee_uttered and self._should_auto_end_after_agent_turn(text):
+            if await self._request_goal_followup_if_needed():
+                return
             self._schedule_auto_end_after_farewell()
 
     async def handle_agent_status(self, status: str) -> None:
@@ -294,6 +321,9 @@ class AgentCallManager:
             await self.nova_session.inject_instruction(instruction.strip())
 
     async def end_conversation(self, farewell_instruction: str) -> None:
+        if await self._request_goal_followup_if_needed():
+            return
+
         await self.inject_instruction(
             farewell_instruction or "Politely say goodbye and end the call."
         )
@@ -322,6 +352,8 @@ class AgentCallManager:
                     logger.error("[%s] error closing Nova session: %s", self.call_sid, exc)
 
             await self._send_verified_facts_summary()
+            await self._send_goal_progress(force=True)
+            await self._send_goal_result_summary(force=True)
 
             self.status = "ended"
             await self._send_ios({"type": "status", "status": "ended"})
@@ -344,6 +376,45 @@ class AgentCallManager:
         if not facts:
             return
         await self._send_ios(summary)
+
+    async def _send_goal_progress(self, *, force: bool = False) -> None:
+        if not self._goal_tracker.enabled:
+            return
+
+        payload = self._goal_tracker.progress_payload()
+        signature = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+        if not force and signature == self._last_goal_progress_signature:
+            return
+
+        self._last_goal_progress_signature = signature
+        await self._send_ios(payload)
+
+    async def _send_goal_result_summary(self, *, force: bool = False) -> None:
+        if not self._goal_tracker.enabled:
+            return
+        if self._goal_result_sent and not force:
+            return
+
+        payload = self._goal_tracker.result_payload()
+        await self._send_ios(payload)
+        self._goal_result_sent = True
+
+    async def _request_goal_followup_if_needed(self) -> bool:
+        if not self._goal_tracker.enabled:
+            return False
+        if self._goal_followup_attempts >= MAX_GOAL_FOLLOWUP_ATTEMPTS:
+            return False
+        if not self._goal_tracker.needs_follow_up():
+            return False
+
+        instruction = self._goal_tracker.build_follow_up_instruction()
+        if not instruction:
+            return False
+
+        self._goal_followup_attempts += 1
+        await self._inject_runtime_instruction(instruction, force=True)
+        await self._send_goal_progress(force=True)
+        return True
 
     def _voice_id_for_language(self, language_code: str) -> str:
         return voice_id_for_language(language_code, self.config.voice_gender)

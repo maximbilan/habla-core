@@ -36,6 +36,7 @@ from app.language_support import (
     supported_languages_payload,
 )
 from app.agent import AgentCallConfig, agent_calls, initiate_agent_outbound_call
+from app.agent.goal_tracker import normalize_goal_required_fields
 from app.caller_id.router import router as caller_id_router
 from app.request_auth import (
     auth_enabled,
@@ -77,12 +78,17 @@ else:
 
 
 class AgentCallRequest(BaseModel):
+    class GoalSchema(BaseModel):
+        objective: str = ""
+        required_fields: list[str] = Field(default_factory=list)
+
     to: str
     from_: str | None = Field(default=None, alias="from")
     prompt: str
     user_name: str = "Caller"
     language: str = DEFAULT_TARGET_LANGUAGE
     voice_gender: str | None = None
+    goal_schema: GoalSchema | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -145,6 +151,15 @@ def _should_process_agent_media_track(track: str | None) -> bool:
         return True
     normalized = track.strip().lower()
     return normalized not in {"outbound", "outbound_track"}
+
+
+def _normalize_goal_schema(req: AgentCallRequest) -> tuple[str, list[str]]:
+    if not req.goal_schema:
+        return "", []
+
+    objective = (req.goal_schema.objective or "").strip() or req.prompt.strip()
+    required_fields = normalize_goal_required_fields(req.goal_schema.required_fields)
+    return objective, required_fields
 
 
 # ===================================================================
@@ -286,6 +301,7 @@ async def create_agent_call(
         voice_gender = normalize_voice_gender(req.voice_gender)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    goal_objective, goal_required_fields = _normalize_goal_schema(req)
 
     try:
         call_sid, caller_id = initiate_agent_outbound_call(
@@ -308,6 +324,8 @@ async def create_agent_call(
             user_name=req.user_name,
             language=language.code,
             voice_gender=voice_gender,
+            goal_objective=goal_objective,
+            goal_required_fields=goal_required_fields,
         ),
     )
     return AgentCallResponse(call_sid=call_sid, status="initiating")

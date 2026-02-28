@@ -6,6 +6,8 @@ import re
 import time
 from dataclasses import dataclass
 
+from app.extraction_patterns import ADDRESS_SUFFIX_PATTERN, MONTH_PATTERN, NAME_INTRO_PATTERN
+
 FACT_TYPE_NAME = "name"
 FACT_TYPE_PHONE = "phone_number"
 FACT_TYPE_DATE = "date"
@@ -28,29 +30,14 @@ _FACT_LABELS_EN = {
     FACT_TYPE_MONEY: "money amount",
 }
 
-_FACT_LABELS_ES = {
-    FACT_TYPE_NAME: "nombre",
-    FACT_TYPE_PHONE: "numero de telefono",
-    FACT_TYPE_DATE: "fecha",
-    FACT_TYPE_ADDRESS: "direccion",
-    FACT_TYPE_MONEY: "monto",
-}
-
-_MONTH_PATTERN = (
-    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
-    r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|"
-    r"dec(?:ember)?|enero|febrero|marzo|abril|mayo|junio|julio|agosto|"
-    r"septiembre|setiembre|octubre|noviembre|diciembre)"
-)
-
 _PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\d\s\-()]{7,}\d)(?!\w)")
 _DATE_SLASH_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", re.IGNORECASE)
 _DATE_MONTH_LEADING_RE = re.compile(
-    rf"\b{_MONTH_PATTERN}\s+\d{{1,2}}(?:,?\s+\d{{2,4}})?\b",
+    rf"\b{MONTH_PATTERN}\s+\d{{1,2}}(?:,?\s+\d{{2,4}})?\b",
     re.IGNORECASE,
 )
 _DATE_DAY_LEADING_RE = re.compile(
-    rf"\b\d{{1,2}}\s+de\s+{_MONTH_PATTERN}(?:\s+de\s+\d{{2,4}})?\b",
+    rf"\b\d{{1,2}}\s+(?:of\s+)?{MONTH_PATTERN}(?:,?\s+\d{{2,4}})?\b",
     re.IGNORECASE,
 )
 _MONEY_RE = re.compile(
@@ -60,12 +47,11 @@ _MONEY_RE = re.compile(
 )
 _ADDRESS_RE = re.compile(
     r"\b\d{1,5}\s+[A-Za-z0-9\s\-.]{2,60}\s"
-    r"(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|"
-    r"court|ct|place|pl|way|calle|avenida|av|camino|paseo)\b",
+    rf"{ADDRESS_SUFFIX_PATTERN}\b",
     re.IGNORECASE,
 )
 _NAME_RE = re.compile(
-    r"\b(?:my name is|this is|i am|i'm|me llamo|mi nombre es|soy)\s+"
+    rf"\b{NAME_INTRO_PATTERN}\s+"
     r"([A-Za-z\u00C0-\u017F]+(?:\s+[A-Za-z\u00C0-\u017F]+){0,3})\b",
     re.IGNORECASE,
 )
@@ -87,7 +73,6 @@ class ConfirmationPrompt:
     candidate_value: str
     confidence: float
     prompt_en: str
-    prompt_es: str
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -98,7 +83,6 @@ class ConfirmationPrompt:
             "candidate_value": self.candidate_value,
             "confidence": round(self.confidence, 3),
             "prompt_en": self.prompt_en,
-            "prompt_es": self.prompt_es,
         }
 
 
@@ -361,16 +345,15 @@ class CriticalInfoTracker:
 
     def _build_low_confidence_prompt(self, fact: DetectedFact) -> ConfirmationPrompt:
         label_en = _FACT_LABELS_EN.get(fact.fact_type, fact.fact_type)
-        label_es = _FACT_LABELS_ES.get(fact.fact_type, fact.fact_type)
         candidate = fact.value
+        prompt_en = f"Please confirm the {label_en}: '{candidate}'."
         return ConfirmationPrompt(
             fact_type=fact.fact_type,
             reason="low_confidence",
             source_value=None,
             candidate_value=candidate,
             confidence=fact.confidence,
-            prompt_en=f"Please confirm the {label_en}: '{candidate}'.",
-            prompt_es=f"Por favor confirma el/la {label_es}: '{candidate}'.",
+            prompt_en=prompt_en,
         )
 
     def _build_translation_mismatch_prompt(
@@ -380,22 +363,18 @@ class CriticalInfoTracker:
         translated_item: DetectedFact,
     ) -> ConfirmationPrompt:
         label_en = _FACT_LABELS_EN.get(source_item.fact_type, source_item.fact_type)
-        label_es = _FACT_LABELS_ES.get(source_item.fact_type, source_item.fact_type)
         confidence = min(source_item.confidence, translated_item.confidence)
+        prompt_en = (
+            f"I heard the {label_en} as '{source_item.value}', "
+            f"but translation says '{translated_item.value}'. Which is correct?"
+        )
         return ConfirmationPrompt(
             fact_type=source_item.fact_type,
             reason="value_changed_in_translation",
             source_value=source_item.value,
             candidate_value=translated_item.value,
             confidence=confidence,
-            prompt_en=(
-                f"I heard the {label_en} as '{source_item.value}', "
-                f"but translation says '{translated_item.value}'. Which is correct?"
-            ),
-            prompt_es=(
-                f"Escuche el/la {label_es} como '{source_item.value}', "
-                f"pero la traduccion dice '{translated_item.value}'. Cual es correcto?"
-            ),
+            prompt_en=prompt_en,
         )
 
     def _build_intracall_mismatch_prompt(
@@ -405,21 +384,17 @@ class CriticalInfoTracker:
         current_fact: DetectedFact,
     ) -> ConfirmationPrompt:
         label_en = _FACT_LABELS_EN.get(current_fact.fact_type, current_fact.fact_type)
-        label_es = _FACT_LABELS_ES.get(current_fact.fact_type, current_fact.fact_type)
+        prompt_en = (
+            f"I previously heard the {label_en} as '{previous_value}', "
+            f"and now I heard '{current_fact.value}'. Please confirm."
+        )
         return ConfirmationPrompt(
             fact_type=current_fact.fact_type,
             reason="value_changed_in_call",
             source_value=previous_value,
             candidate_value=current_fact.value,
             confidence=current_fact.confidence,
-            prompt_en=(
-                f"I previously heard the {label_en} as '{previous_value}', "
-                f"and now I heard '{current_fact.value}'. Please confirm."
-            ),
-            prompt_es=(
-                f"Antes escuche el/la {label_es} como '{previous_value}', "
-                f"y ahora escuche '{current_fact.value}'. Por favor confirma."
-            ),
+            prompt_en=prompt_en,
         )
 
     def _looks_like_variation(self, *, fact_type: str, left: str, right: str) -> bool:
@@ -509,7 +484,7 @@ class CriticalInfoTracker:
         lowered = value.lower()
         if re.search(r"\d{4}", lowered):
             return 0.91
-        if re.search(_MONTH_PATTERN, lowered, re.IGNORECASE):
+        if re.search(MONTH_PATTERN, lowered, re.IGNORECASE):
             return 0.88
         return 0.8
 
