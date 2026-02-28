@@ -46,6 +46,8 @@ MAX_SESSION_RETRIES = 3
 RETRY_DELAY = 1.0  # seconds
 AUDIO_INPUT_QUEUE_MAX_CHUNKS = 24
 AUDIO_INPUT_QUEUE_TIMEOUT = 0.2
+TEXT_EVENT_QUEUE_MAX_ITEMS = 128
+TEXT_EVENT_QUEUE_TIMEOUT = 0.2
 
 
 class TranslationBridge:
@@ -80,6 +82,9 @@ class TranslationBridge:
         self._session_b_input_queue: asyncio.Queue[bytes] = asyncio.Queue(
             maxsize=AUDIO_INPUT_QUEUE_MAX_CHUNKS
         )
+        self._text_event_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(
+            maxsize=TEXT_EVENT_QUEUE_MAX_ITEMS
+        )
 
     # ------------------------------------------------------------------
     # Session A — source ➜ target  (iOS mic → phone speaker)
@@ -101,6 +106,12 @@ class TranslationBridge:
         )
         await self.session_a.start()
 
+        self._tasks.append(
+            asyncio.create_task(
+                self._process_text_events(),
+                name=f"{self.call_sid}-text-events",
+            )
+        )
         self._tasks.append(
             asyncio.create_task(
                 self._pump_session_a_input(),
@@ -287,18 +298,35 @@ class TranslationBridge:
             logger.error("[%s] route B→iOS error: %s", self.call_sid, e)
 
     async def _handle_session_a_text(self, text: str) -> None:
-        candidate = self._coalesce_text(role="session_a_output", text=text)
-        if not candidate:
-            return
-        await self._send_ios_event({"type": "translation", "text": candidate, "is_final": True})
-        await self._process_critical_text(role="session_a_output", text=candidate)
+        self._enqueue_text_event("session_a_output", text)
 
     async def _handle_session_b_text(self, text: str) -> None:
-        candidate = self._coalesce_text(role="session_b_output", text=text)
+        self._enqueue_text_event("session_b_output", text)
+
+    async def _process_text_events(self) -> None:
+        try:
+            while not self._closed or not self._text_event_queue.empty():
+                item = await self._read_text_event()
+                if item is None:
+                    continue
+                role, text = item
+                await self._handle_text_event(role=role, text=text)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("[%s] text event worker error: %s", self.call_sid, e)
+
+    async def _handle_text_event(self, *, role: str, text: str) -> None:
+        candidate = self._coalesce_text(role=role, text=text)
         if not candidate:
             return
-        await self._send_ios_event({"type": "transcription", "text": candidate, "is_final": True})
-        await self._process_critical_text(role="session_b_output", text=candidate)
+
+        if role == "session_a_output":
+            await self._send_ios_event({"type": "translation", "text": candidate, "is_final": True})
+        elif role == "session_b_output":
+            await self._send_ios_event({"type": "transcription", "text": candidate, "is_final": True})
+
+        await self._process_critical_text(role=role, text=candidate)
 
     async def _process_critical_text(self, *, role: str, text: str) -> None:
         confirmations = self._critical_tracker.observe_text(role=role, text=text)
@@ -364,6 +392,12 @@ class TranslationBridge:
         except asyncio.TimeoutError:
             return None
 
+    async def _read_text_event(self) -> tuple[str, str] | None:
+        try:
+            return await asyncio.wait_for(self._text_event_queue.get(), timeout=TEXT_EVENT_QUEUE_TIMEOUT)
+        except asyncio.TimeoutError:
+            return None
+
     def _enqueue_input_audio(self, queue: asyncio.Queue[bytes], chunk: bytes) -> None:
         try:
             queue.put_nowait(chunk)
@@ -374,6 +408,22 @@ class TranslationBridge:
                 pass
             try:
                 queue.put_nowait(chunk)
+            except asyncio.QueueFull:
+                pass
+
+    def _enqueue_text_event(self, role: str, text: str) -> None:
+        cleaned = " ".join((text or "").split()).strip()
+        if not cleaned:
+            return
+        try:
+            self._text_event_queue.put_nowait((role, cleaned))
+        except asyncio.QueueFull:
+            try:
+                _ = self._text_event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                self._text_event_queue.put_nowait((role, cleaned))
             except asyncio.QueueFull:
                 pass
 
@@ -453,8 +503,6 @@ class TranslationBridge:
         self._closed = True
         logger.info("[%s] Shutting down translation bridge", self.call_sid)
 
-        await self._send_verified_summary()
-
         for task in self._tasks:
             if not task.done():
                 task.cancel()
@@ -469,5 +517,12 @@ class TranslationBridge:
                     logger.error(
                         "[%s] Error closing session %s: %s", self.call_sid, label, e
                     )
+
+        while not self._text_event_queue.empty():
+            item = self._text_event_queue.get_nowait()
+            role, text = item
+            await self._handle_text_event(role=role, text=text)
+
+        await self._send_verified_summary()
 
         logger.info("[%s] Translation bridge closed", self.call_sid)
