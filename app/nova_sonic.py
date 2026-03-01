@@ -126,9 +126,10 @@ class NovaSonicSession:
             "event": {
                 "sessionStart": {
                     "inferenceConfiguration": {
-                        "maxTokens": 1024,
-                        "topP": 0.9,
-                        "temperature": 0.7,
+                        # Translation call mode prefers short, fast utterances.
+                        "maxTokens": 320,
+                        "topP": 0.8,
+                        "temperature": 0.3,
                     },
                     "turnDetectionConfiguration": {
                         "endpointingSensitivity": "HIGH",
