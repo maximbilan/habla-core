@@ -23,7 +23,7 @@ from app.language_support import (
     resolve_supported_language,
     voice_id_for_language,
 )
-from app.critical_info import CriticalInfoTracker
+from app.agent.critical_info import CriticalInfoTracker
 
 logger = logging.getLogger(__name__)
 

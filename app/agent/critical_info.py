@@ -6,7 +6,11 @@ import re
 import time
 from dataclasses import dataclass
 
-from app.extraction_patterns import ADDRESS_SUFFIX_PATTERN, MONTH_PATTERN, NAME_INTRO_PATTERN
+from app.agent.extraction_patterns import (
+    ADDRESS_SUFFIX_PATTERN,
+    MONTH_PATTERN,
+    NAME_INTRO_PATTERN,
+)
 
 FACT_TYPE_NAME = "name"
 FACT_TYPE_PHONE = "phone_number"
