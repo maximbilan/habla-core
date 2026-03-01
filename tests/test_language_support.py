@@ -41,6 +41,8 @@ def test_build_translation_system_prompt_is_concise_for_fast_call_mode():
     lowered = prompt.lower()
     assert "real-time speech translator" in lowered
     assert "respond only with translated speech" in lowered
+    assert "never say a language is unsupported" in lowered
+    assert "wait silently for more audio" in lowered
     assert "deliver short translated chunks immediately" in lowered
 
 

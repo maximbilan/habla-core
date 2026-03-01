@@ -130,7 +130,7 @@ class NovaSonicSession:
                         "temperature": 0.3,
                     },
                     "turnDetectionConfiguration": {
-                        "endpointingSensitivity": "HIGH",
+                        "endpointingSensitivity": "MEDIUM",
                     },
                 }
             }
