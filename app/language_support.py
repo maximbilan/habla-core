@@ -120,10 +120,17 @@ def build_translation_system_prompt(source_language: str, target_language: str) 
     source = SUPPORTED_NOVA_LANGUAGES[source_language]
     target = SUPPORTED_NOVA_LANGUAGES[target_language]
     return (
-        "You are a real-time speech translator. "
-        f"Translate spoken {source.label} into natural {target.label}. "
-        "Respond only with translated speech, with no commentary. "
-        "Deliver short translated chunks immediately."
+        "You are a real-time voice translator. Listen to the user speaking in "
+        f"{source.label} and respond by saying the exact same message translated "
+        f"into natural, conversational {target.label}. Do not add any commentary, "
+        "greetings, or explanations. Never announce that translation is happening, "
+        "never mention delays or processing time, and never provide policy/disclaimer "
+        "messages. Do not speak until you have heard actual user speech to translate. "
+        "Only output the translation of what was said. Maintain the same tone and intent. "
+        "Respond in short, immediate chunks instead of waiting for full sentences. "
+        "For long speech, break the translation into short phrases and deliver each "
+        "phrase as soon as it is clear. Keep each response concise and end right after "
+        "the translated content."
     )
 
 
