@@ -76,6 +76,7 @@ class TranslationBridge:
         self._closed = False
         self._critical_tracker = CriticalInfoTracker()
         self._last_emitted_text_by_role: dict[str, str] = {}
+        self._deferred_fact_events: list[tuple[str, str]] = []
         self._session_a_input_queue: asyncio.Queue[bytes] = asyncio.Queue(
             maxsize=AUDIO_INPUT_QUEUE_MAX_CHUNKS
         )
@@ -321,12 +322,8 @@ class TranslationBridge:
         if not candidate:
             return
 
-        await self._process_critical_text(role=role, text=candidate)
-
-    async def _process_critical_text(self, *, role: str, text: str) -> None:
-        # Fast call mode: keep fact tracking for post-call summary, but avoid
-        # live critical confirmation turns during the conversation.
-        _ = self._critical_tracker.observe_text(role=role, text=text)
+        # Keep call mode fast: defer critical extraction until call teardown.
+        self._deferred_fact_events.append((role, candidate))
 
     def _coalesce_text(self, *, role: str, text: str) -> str | None:
         cleaned = " ".join((text or "").split()).strip()
@@ -353,6 +350,13 @@ class TranslationBridge:
         if not facts:
             return
         await self._send_ios_event(summary)
+
+    def _finalize_deferred_facts(self) -> None:
+        if not self._deferred_fact_events:
+            return
+        for role, text in self._deferred_fact_events:
+            _ = self._critical_tracker.observe_text(role=role, text=text)
+        self._deferred_fact_events.clear()
 
     async def _send_ios_event(self, payload: dict[str, object]) -> None:
         if not self.ios_ws:
@@ -518,6 +522,7 @@ class TranslationBridge:
             role, text = item
             await self._handle_text_event(role=role, text=text)
 
+        self._finalize_deferred_facts()
         await self._send_verified_summary()
 
         logger.info("[%s] Translation bridge closed", self.call_sid)
