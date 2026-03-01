@@ -36,12 +36,12 @@ def test_build_translation_system_prompt_mentions_languages():
     assert "Spanish (US)" in prompt
 
 
-def test_build_translation_system_prompt_blocks_disclaimer_announcements():
+def test_build_translation_system_prompt_is_concise_for_fast_call_mode():
     prompt = build_translation_system_prompt(DEFAULT_SOURCE_LANGUAGE, DEFAULT_TARGET_LANGUAGE)
     lowered = prompt.lower()
-    assert "never announce that translation is happening" in lowered
-    assert "never mention delays" in lowered
-    assert "do not speak until you have heard actual user speech" in lowered
+    assert "real-time speech translator" in lowered
+    assert "respond only with translated speech" in lowered
+    assert "deliver short translated chunks immediately" in lowered
 
 
 def test_normalize_voice_gender_accepts_none_and_known_values():

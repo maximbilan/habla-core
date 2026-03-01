@@ -50,7 +50,6 @@ class NovaSonicSession:
         input_sample_rate: int = 16000,
         output_sample_rate: int = 24000,
         on_audio_output: Optional[Callable[[bytes], Awaitable[None]]] = None,
-        on_text_output: Optional[Callable[[str], Awaitable[None]]] = None,
     ):
         self.session_id = session_id
         self.system_prompt = system_prompt
@@ -75,7 +74,6 @@ class NovaSonicSession:
 
         self._response_task: Optional[asyncio.Task] = None
         self._on_audio_output = on_audio_output
-        self._on_text_output = on_text_output
         self._died_unexpectedly = False
 
     # ------------------------------------------------------------------
@@ -143,9 +141,6 @@ class NovaSonicSession:
             "event": {
                 "promptStart": {
                     "promptName": self.prompt_name,
-                    "textOutputConfiguration": {
-                        "mediaType": "text/plain",
-                    },
                     "audioOutputConfiguration": {
                         "mediaType": "audio/lpcm",
                         "sampleRateHertz": self.output_sample_rate,
@@ -283,16 +278,6 @@ class NovaSonicSession:
                 except Exception as e:
                     logger.error("audio output callback error [%s]: %s", self.session_id, e)
 
-        # ── text transcript (log only)
-        elif "textOutput" in event:
-            text = event["textOutput"].get("content", "")
-            logger.debug("[%s] transcript: %s", self.session_id, text[:120])
-            if self._on_text_output and text:
-                asyncio.create_task(
-                    self._dispatch_text_output(text),
-                    name=f"nova-text-{self.session_id}",
-                )
-
         # ── content lifecycle
         elif "contentStart" in event:
             cs = event["contentStart"]
@@ -309,14 +294,6 @@ class NovaSonicSession:
             reason = event["contentEnd"].get("stopReason", "")
             if reason == "INTERRUPTED":
                 logger.info("[%s] barge-in detected", self.session_id)
-
-    async def _dispatch_text_output(self, text: str) -> None:
-        if not self._on_text_output:
-            return
-        try:
-            await self._on_text_output(text)
-        except Exception as e:
-            logger.error("text output callback error [%s]: %s", self.session_id, e)
 
     # ------------------------------------------------------------------
     # Shutdown

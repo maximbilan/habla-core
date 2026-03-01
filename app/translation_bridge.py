@@ -37,7 +37,6 @@ from app.language_support import (
     build_translation_system_prompt,
     voice_id_for_language,
 )
-from app.critical_info import CriticalInfoTracker
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +45,6 @@ MAX_SESSION_RETRIES = 3
 RETRY_DELAY = 1.0  # seconds
 AUDIO_INPUT_QUEUE_MAX_CHUNKS = 24
 AUDIO_INPUT_QUEUE_TIMEOUT = 0.2
-TEXT_EVENT_QUEUE_MAX_ITEMS = 128
-TEXT_EVENT_QUEUE_TIMEOUT = 0.2
 
 
 class TranslationBridge:
@@ -74,17 +71,11 @@ class TranslationBridge:
 
         self._tasks: list[asyncio.Task] = []
         self._closed = False
-        self._critical_tracker = CriticalInfoTracker()
-        self._last_emitted_text_by_role: dict[str, str] = {}
-        self._deferred_fact_events: list[tuple[str, str]] = []
         self._session_a_input_queue: asyncio.Queue[bytes] = asyncio.Queue(
             maxsize=AUDIO_INPUT_QUEUE_MAX_CHUNKS
         )
         self._session_b_input_queue: asyncio.Queue[bytes] = asyncio.Queue(
             maxsize=AUDIO_INPUT_QUEUE_MAX_CHUNKS
-        )
-        self._text_event_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(
-            maxsize=TEXT_EVENT_QUEUE_MAX_ITEMS
         )
 
     # ------------------------------------------------------------------
@@ -103,16 +94,9 @@ class TranslationBridge:
             voice_id=self._voice_id_for_language(self.target_language),
             input_sample_rate=INPUT_SAMPLE_RATE,
             output_sample_rate=OUTPUT_SAMPLE_RATE,
-            on_text_output=self._handle_session_a_text,
         )
         await self.session_a.start()
 
-        self._tasks.append(
-            asyncio.create_task(
-                self._process_text_events(),
-                name=f"{self.call_sid}-text-events",
-            )
-        )
         self._tasks.append(
             asyncio.create_task(
                 self._pump_session_a_input(),
@@ -151,7 +135,6 @@ class TranslationBridge:
             voice_id=self._voice_id_for_language(self.source_language),
             input_sample_rate=INPUT_SAMPLE_RATE,
             output_sample_rate=OUTPUT_SAMPLE_RATE,
-            on_text_output=self._handle_session_b_text,
         )
         await self.session_b.start()
 
@@ -298,74 +281,6 @@ class TranslationBridge:
         except Exception as e:
             logger.error("[%s] route B→iOS error: %s", self.call_sid, e)
 
-    async def _handle_session_a_text(self, text: str) -> None:
-        self._enqueue_text_event("session_a_output", text)
-
-    async def _handle_session_b_text(self, text: str) -> None:
-        self._enqueue_text_event("session_b_output", text)
-
-    async def _process_text_events(self) -> None:
-        try:
-            while not self._closed or not self._text_event_queue.empty():
-                item = await self._read_text_event()
-                if item is None:
-                    continue
-                role, text = item
-                await self._handle_text_event(role=role, text=text)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error("[%s] text event worker error: %s", self.call_sid, e)
-
-    async def _handle_text_event(self, *, role: str, text: str) -> None:
-        candidate = self._coalesce_text(role=role, text=text)
-        if not candidate:
-            return
-
-        # Keep call mode fast: defer critical extraction until call teardown.
-        self._deferred_fact_events.append((role, candidate))
-
-    def _coalesce_text(self, *, role: str, text: str) -> str | None:
-        cleaned = " ".join((text or "").split()).strip()
-        if not cleaned:
-            return None
-
-        previous = self._last_emitted_text_by_role.get(role, "")
-        if cleaned == previous:
-            return None
-
-        # Nova can emit rapidly-growing partial fragments.
-        # Skip tiny incremental updates to keep the audio path responsive.
-        if previous and cleaned.startswith(previous):
-            growth = len(cleaned) - len(previous)
-            if growth < 12 and not cleaned.endswith((".", "!", "?")):
-                return None
-
-        self._last_emitted_text_by_role[role] = cleaned
-        return cleaned
-
-    async def _send_verified_summary(self) -> None:
-        summary = self._critical_tracker.summary_payload()
-        facts = summary.get("facts", [])
-        if not facts:
-            return
-        await self._send_ios_event(summary)
-
-    def _finalize_deferred_facts(self) -> None:
-        if not self._deferred_fact_events:
-            return
-        for role, text in self._deferred_fact_events:
-            _ = self._critical_tracker.observe_text(role=role, text=text)
-        self._deferred_fact_events.clear()
-
-    async def _send_ios_event(self, payload: dict[str, object]) -> None:
-        if not self.ios_ws:
-            return
-        try:
-            await self.ios_ws.send_text(json.dumps(payload, separators=(",", ":"), ensure_ascii=True))
-        except Exception:
-            pass
-
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -391,12 +306,6 @@ class TranslationBridge:
         except asyncio.TimeoutError:
             return None
 
-    async def _read_text_event(self) -> tuple[str, str] | None:
-        try:
-            return await asyncio.wait_for(self._text_event_queue.get(), timeout=TEXT_EVENT_QUEUE_TIMEOUT)
-        except asyncio.TimeoutError:
-            return None
-
     def _enqueue_input_audio(self, queue: asyncio.Queue[bytes], chunk: bytes) -> None:
         try:
             queue.put_nowait(chunk)
@@ -407,22 +316,6 @@ class TranslationBridge:
                 pass
             try:
                 queue.put_nowait(chunk)
-            except asyncio.QueueFull:
-                pass
-
-    def _enqueue_text_event(self, role: str, text: str) -> None:
-        cleaned = " ".join((text or "").split()).strip()
-        if not cleaned:
-            return
-        try:
-            self._text_event_queue.put_nowait((role, cleaned))
-        except asyncio.QueueFull:
-            try:
-                _ = self._text_event_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            try:
-                self._text_event_queue.put_nowait((role, cleaned))
             except asyncio.QueueFull:
                 pass
 
@@ -446,7 +339,6 @@ class TranslationBridge:
                 voice_id=self._voice_id_for_language(self.target_language),
                 input_sample_rate=INPUT_SAMPLE_RATE,
                 output_sample_rate=OUTPUT_SAMPLE_RATE,
-                on_text_output=self._handle_session_a_text,
             )
             await self.session_a.start()
             logger.info(
@@ -477,7 +369,6 @@ class TranslationBridge:
                 voice_id=self._voice_id_for_language(self.source_language),
                 input_sample_rate=INPUT_SAMPLE_RATE,
                 output_sample_rate=OUTPUT_SAMPLE_RATE,
-                on_text_output=self._handle_session_b_text,
             )
             await self.session_b.start()
             logger.info(
@@ -516,13 +407,5 @@ class TranslationBridge:
                     logger.error(
                         "[%s] Error closing session %s: %s", self.call_sid, label, e
                     )
-
-        while not self._text_event_queue.empty():
-            item = self._text_event_queue.get_nowait()
-            role, text = item
-            await self._handle_text_event(role=role, text=text)
-
-        self._finalize_deferred_facts()
-        await self._send_verified_summary()
 
         logger.info("[%s] Translation bridge closed", self.call_sid)
