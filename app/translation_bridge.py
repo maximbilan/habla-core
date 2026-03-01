@@ -15,6 +15,7 @@ Audio pipeline:
 from __future__ import annotations
 
 import asyncio
+import audioop
 import json
 import logging
 from typing import Optional
@@ -48,6 +49,8 @@ AUDIO_INPUT_QUEUE_MAX_CHUNKS = 24
 AUDIO_INPUT_QUEUE_TIMEOUT = 0.2
 TEXT_EVENT_QUEUE_MAX_ITEMS = 128
 TEXT_EVENT_QUEUE_TIMEOUT = 0.2
+SILENCE_RMS_THRESHOLD = 220
+SILENCE_MIN_CHUNK_BYTES = 320
 
 
 class TranslationBridge:
@@ -180,6 +183,8 @@ class TranslationBridge:
     async def handle_ios_audio(self, pcm_16k: bytes) -> None:
         """iOS app sent a PCM 16 kHz chunk — forward to Session A."""
         if self.session_a and self.session_a.is_active:
+            if not self._has_speech(pcm_16k):
+                return
             self._enqueue_input_audio(self._session_a_input_queue, pcm_16k)
 
     async def handle_twilio_media(self, payload: str) -> None:
@@ -188,6 +193,8 @@ class TranslationBridge:
             return
         mulaw_bytes = decode_twilio_media(payload)
         pcm_16k = mulaw_8k_to_pcm_16k(mulaw_bytes)
+        if not self._has_speech(pcm_16k):
+            return
         self._enqueue_input_audio(self._session_b_input_queue, pcm_16k)
 
     # ------------------------------------------------------------------
@@ -321,17 +328,12 @@ class TranslationBridge:
         if not candidate:
             return
 
-        if role == "session_a_output":
-            await self._send_ios_event({"type": "translation", "text": candidate, "is_final": True})
-        elif role == "session_b_output":
-            await self._send_ios_event({"type": "transcription", "text": candidate, "is_final": True})
-
         await self._process_critical_text(role=role, text=candidate)
 
     async def _process_critical_text(self, *, role: str, text: str) -> None:
-        confirmations = self._critical_tracker.observe_text(role=role, text=text)
-        for prompt in confirmations:
-            await self._send_ios_event(prompt.to_payload())
+        # Fast call mode: keep fact tracking for post-call summary, but avoid
+        # live critical confirmation turns during the conversation.
+        _ = self._critical_tracker.observe_text(role=role, text=text)
 
     def _coalesce_text(self, *, role: str, text: str) -> str | None:
         cleaned = " ".join((text or "").split()).strip()
@@ -426,6 +428,15 @@ class TranslationBridge:
                 self._text_event_queue.put_nowait((role, cleaned))
             except asyncio.QueueFull:
                 pass
+
+    def _has_speech(self, pcm_16k: bytes) -> bool:
+        if len(pcm_16k) < SILENCE_MIN_CHUNK_BYTES:
+            return False
+        try:
+            return audioop.rms(pcm_16k, 2) >= SILENCE_RMS_THRESHOLD
+        except Exception:
+            # Never block the call path if RMS analysis fails.
+            return True
 
     def _voice_id_for_language(self, language_code: str) -> str:
         return voice_id_for_language(language_code, self.voice_gender)
