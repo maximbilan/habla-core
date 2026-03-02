@@ -101,6 +101,42 @@ Core components:
 
 iOS agent WS receives structured events (`status`, `agent_status`, transcript events, critical confirmation, verified summary).
 
+### 6.1 Agent Mode Runtime Sequence
+
+```mermaid
+sequenceDiagram
+    participant iOS as iOS Client
+    participant API as FastAPI (app.main)
+    participant Twilio as Twilio Voice + Media Streams
+    participant Manager as AgentCallManager
+    participant Nova as AgentNovaSession (Nova 2 Sonic)
+    participant Transcript as TranscriptService
+    participant Critical as CriticalInfoTracker
+
+    iOS->>API: POST /agent/call
+    API->>Twilio: create outbound call
+    API->>Manager: agent_calls.create(call_sid, config)
+
+    Twilio->>API: POST /agent/twilio/webhook/{call_sid}
+    API-->>Twilio: TwiML Connect/Stream
+    Twilio->>API: WS /agent/twilio/media-stream/{call_sid}
+    API->>Manager: on_twilio_start(stream_sid)
+    Manager->>Nova: ensure_nova_session()
+
+    Twilio->>API: media payload (mulaw 8k)
+    API->>Manager: handle_twilio_media(payload)
+    Manager->>Nova: send_audio(pcm 16k)
+    Nova-->>Manager: audioOutput + textOutput + status events
+    Manager-->>Twilio: agent audio (mulaw 8k)
+
+    iOS->>API: WS /agent/ws/{call_sid}
+    iOS->>API: instruction / end_conversation / end_call
+    API->>Manager: inject_instruction(...) / end_call()
+    Manager->>Transcript: add entry + async translate_to_english()
+    Manager->>Critical: observe_text() / observe_translation_pair()
+    Manager-->>iOS: status + agent_status + transcript + confirmations + verified summary
+```
+
 ## 7. Caller-ID and Ownership Architecture
 
 Caller-id flow combines Twilio verified outgoing caller-ids with ownership claims in `habla-accounts`:
