@@ -111,7 +111,7 @@ sequenceDiagram
     participant Manager as AgentCallManager
     participant Nova as AgentNovaSession (Nova 2 Sonic)
     participant Transcript as TranscriptService
-    participant Critical as CriticalInfoTracker
+    participant FactTracker as CriticalInfoTracker
 
     iOS->>API: POST /agent/call
     API->>Twilio: create outbound call
@@ -133,7 +133,7 @@ sequenceDiagram
     iOS->>API: instruction / end_conversation / end_call
     API->>Manager: inject_instruction(...) / end_call()
     Manager->>Transcript: add entry + async translate_to_english()
-    Manager->>Critical: observe_text() / observe_translation_pair()
+    Manager->>FactTracker: observe_text() / observe_translation_pair()
     Manager-->>iOS: status + agent_status + transcript + confirmations + verified summary
 ```
 
