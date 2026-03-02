@@ -7,6 +7,9 @@ This service supports both iOS modes:
 - **Live Call Mode**: low-latency bidirectional phone-call translation.
 - **Agent Mode**: autonomous caller agent with transcript + verified-facts signals.
 
+System architecture and sequence diagrams: [`architecture.md`](architecture.md)  
+Direct Agent Mode flow diagram: [`architecture.md#61-agent-mode-runtime-sequence`](architecture.md#61-agent-mode-runtime-sequence).
+
 ## Current Implementation Summary
 
 ### Live Call Mode (fast audio path)
