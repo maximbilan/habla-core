@@ -38,16 +38,6 @@ MONTH_KEYWORDS = (
     "dec",
 )
 
-WEEKDAY_KEYWORDS = (
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-    "sunday",
-)
-
 ADDRESS_SUFFIX_KEYWORDS = (
     "street",
     "st",
@@ -81,23 +71,6 @@ NAME_INTRO_KEYWORDS = (
     "i'm",
 )
 
-LOCATION_PREFIX_KEYWORDS = (
-    "address is",
-    "located at",
-    "meet at",
-    "location is",
-)
-
-NEXT_STEP_PREFIX_KEYWORDS = (
-    "next step is",
-    "you should",
-    "please",
-    "the process is",
-)
-
 MONTH_PATTERN = rf"(?:{_alternation(MONTH_KEYWORDS)})"
-WEEKDAY_PATTERN = rf"(?:{_alternation(WEEKDAY_KEYWORDS)})"
 ADDRESS_SUFFIX_PATTERN = rf"(?:{_alternation(ADDRESS_SUFFIX_KEYWORDS)})"
 NAME_INTRO_PATTERN = rf"(?:{_alternation(NAME_INTRO_KEYWORDS)})"
-LOCATION_PREFIX_PATTERN = rf"(?:{_alternation(LOCATION_PREFIX_KEYWORDS)})"
-NEXT_STEP_PREFIX_PATTERN = rf"(?:{_alternation(NEXT_STEP_PREFIX_KEYWORDS)})"
