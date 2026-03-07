@@ -81,12 +81,14 @@ It also logs per-direction latency checkpoints:
 ## 5. Translation Call Lifecycle
 
 1. `POST /call` validates languages and voice gender.
-2. Backend initiates Twilio outbound call (`twilio_handler.initiate_outbound_call`).
+2. Backend initiates Twilio outbound call (`twilio_handler.initiate_outbound_call`) with inline TwiML that opens `/twilio/media-stream`.
 3. `CallManager` creates `CallState` with `TranslationBridge`.
 4. iOS connects `WS /ws/{call_sid}` and starts session A.
 5. Twilio connects `WS /twilio/media-stream` and starts session B.
 6. Audio flows bidirectionally until hangup/disconnect.
 7. `cleanup_call` closes bridge tasks/sessions and websockets (idempotent lock).
+
+`POST /twilio/webhook` remains available as a compatibility TwiML endpoint, but the primary outbound path currently sends TwiML directly in call creation.
 
 ## 6. Agent Mode Architecture
 
@@ -155,7 +157,7 @@ This prevents one device from using another device's verified caller-id mapping.
 If `HABLA_SECRET` is configured:
 
 - iOS REST + iOS websocket routes require `Authorization`
-- expected token: `HMAC_SHA256(HABLA_SECRET, HABLA_APP_BUNDLE_ID)`
+- expected token: `HMAC_SHA256(HABLA_SECRET, HABLA_APP_BUNDLE_ID)` (raw token or `Bearer <token>`)
 
 Twilio webhook/media endpoints are intentionally unauthenticated and validated by Twilio call context.
 
