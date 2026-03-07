@@ -96,7 +96,6 @@ class _FactState:
     normalized: str
     value: str
     confidence: float
-    first_seen: float
     last_seen: float
     occurrences: int = 1
     verified: bool = False
@@ -327,7 +326,6 @@ class CriticalInfoTracker:
                 normalized=fact.normalized,
                 value=fact.value,
                 confidence=fact.confidence,
-                first_seen=now,
                 last_seen=now,
                 last_role=role,
             )
