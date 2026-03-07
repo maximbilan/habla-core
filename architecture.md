@@ -78,13 +78,13 @@ It also logs per-direction latency checkpoints:
 
 ## 5. Translation Call Lifecycle
 
-1. `POST /call` validates languages and voice gender.
-2. Backend initiates Twilio outbound call (`twilio_handler.initiate_outbound_call`) with inline TwiML that opens `/twilio/media-stream`.
-3. `CallManager` creates `CallState` with `TranslationBridge`.
-4. iOS connects `WS /ws/{call_sid}` and starts session A.
-5. Twilio connects `WS /twilio/media-stream` and starts session B.
-6. Audio flows bidirectionally until hangup/disconnect.
-7. `cleanup_call` closes bridge tasks/sessions and websockets (idempotent lock).
+1. `POST /call` validates languages and voice gender
+2. Backend initiates Twilio outbound call (`twilio_handler.initiate_outbound_call`) with inline TwiML that opens `/twilio/media-stream`
+3. `CallManager` creates `CallState` with `TranslationBridge`
+4. iOS connects `WS /ws/{call_sid}` and starts session A
+5. Twilio connects `WS /twilio/media-stream` and starts session B
+6. Audio flows bidirectionally until hangup/disconnect
+7. `cleanup_call` closes bridge tasks/sessions and websockets (idempotent lock)
 
 `POST /twilio/webhook` remains available as a compatibility TwiML endpoint, but the primary outbound path currently sends TwiML directly in call creation.
 
@@ -179,7 +179,7 @@ Runtime state is in-memory for active calls; process restart drops active sessio
 
 ## 10. Operational Considerations
 
-- Horizontal scale requires externalized call/session state or sticky routing.
-- Twilio media streams and iOS WS must land on same process owning the call state.
-- Bounded queue strategy prioritizes recency over completeness during overload.
-- Agent mode contains richer logic and higher CPU/network cost than translation call mode.
+- Horizontal scale requires externalized call/session state or sticky routing
+- Twilio media streams and iOS WS must land on same process owning the call state
+- Bounded queue strategy prioritizes recency over completeness during overload
+- Agent mode contains richer logic and higher CPU/network cost than translation call mode
