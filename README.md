@@ -41,11 +41,12 @@ Direct Agent Mode flow diagram: [`architecture.md#61-agent-mode-runtime-sequence
 
 ### Translation
 
+- `GET /`
 - `GET /translation/languages`
 - `POST /call`
 - `POST /call/{sid}/end`
 - `GET /call/{sid}/status`
-- `POST /twilio/webhook`
+- `POST /twilio/webhook` (compatibility TwiML endpoint)
 - `WS /ws/{call_sid}`
 - `WS /twilio/media-stream`
 
@@ -88,6 +89,8 @@ Caller ID ownership-sensitive routes also require:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+# test-only deps
+pip install pytest httpx
 ```
 
 ### 2) Configure
@@ -116,8 +119,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ## Tests
 
 ```bash
-python -m compileall app
-pytest -q
+python -m compileall app tests
+PYTHONPATH=. pytest -q
 ```
 
 ## Deployment (EC2)
