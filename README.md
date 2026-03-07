@@ -1,11 +1,11 @@
-# habla-core
+# Habla Core
 
-AWS/Nova backend for Habla.
+AWS/Nova backend for Habla app.
 
 This service supports both iOS modes:
 
-- **Live Call Mode**: low-latency bidirectional phone-call translation.
-- **Agent Mode**: autonomous caller agent with transcript + verified-facts signals.
+- **Live Call Mode**: low-latency bidirectional phone-call translation
+- **Agent Mode**: autonomous caller agent with transcript + verified-facts signals
 
 System architecture and sequence diagrams: [`architecture.md`](architecture.md)  
 Direct Agent Mode flow diagram: [`architecture.md#61-agent-mode-runtime-sequence`](architecture.md#61-agent-mode-runtime-sequence).
@@ -17,25 +17,24 @@ Direct Agent Mode flow diagram: [`architecture.md#61-agent-mode-runtime-sequence
 - Uses two Amazon Nova 2 Sonic sessions per call:
   - iOS -> callee language (to Twilio/PSTN)
   - callee -> iOS language (back to app)
-- Streams audio in both directions continuously.
-- Optimized for latency: translation call mode focuses on audio forwarding.
-- Translation mode does **not** run agent-only logic (critical-info extraction, agent transcript workflow).
+- Streams audio in both directions continuously
+- Optimized for latency: translation call mode focuses on audio forwarding
 
 ### Agent Mode
 
 - Twilio call orchestration with model-driven agent conversation.
 - WebSocket events for:
-  - call status,
-  - agent status (`listening/thinking/speaking`),
-  - transcript and transcript updates,
-  - critical confirmations,
-  - verified facts summary.
+  - call status
+  - agent status (`listening/thinking/speaking`)
+  - transcript and transcript updates
+  - critical confirmations
+  - verified facts summar.
 
 ### Caller ID Isolation
 
-- Caller ID verification/list/delete endpoints are provided.
-- Ownership is enforced per device via `X-Habla-Device-ID`.
-- Shared ownership state is delegated to `habla-accounts` (`HABLA_ACCOUNTS_*`).
+- Caller ID verification/list/delete endpoints are provided
+- Ownership is enforced per device via `X-Habla-Device-ID`
+- Shared ownership state is delegated to `habla-accounts` (`HABLA_ACCOUNTS_*`)
 
 ## API Surface
 
@@ -127,11 +126,11 @@ PYTHONPATH=. pytest -q
 
 Main branch deploy is handled by `.github/workflows/deploy-ec2.yml`:
 
-- runs syntax validation,
-- rsyncs source to EC2,
-- installs dependencies in server venv,
-- restarts `habla-core` systemd service,
-- runs local health check (`http://127.0.0.1:8000/`).
+- runs syntax validation
+- rsyncs source to EC2
+- installs dependencies in server venv
+- restarts `habla-core` systemd service
+- runs local health check (`http://127.0.0.1:8000/`)
 
 Required GitHub variables/secrets are defined in the workflow (`EC2_*`, `EC2_SSH_PRIVATE_KEY`).
 
