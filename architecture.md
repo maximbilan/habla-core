@@ -1,8 +1,6 @@
-# habla-core Architecture
+# Architecture
 
 ## 1. Scope
-
-`habla-core` is the AWS/Nova backend for Habla and exposes:
 
 - Live call translation APIs and media bridges
 - Agent mode orchestration APIs/websockets
