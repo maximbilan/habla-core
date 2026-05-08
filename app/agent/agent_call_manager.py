@@ -291,12 +291,24 @@ class AgentCallManager:
                     )
                 )
                 await self._send_verified_facts_summary()
+
+                if (
+                    role == "agent"
+                    and self._has_callee_uttered
+                    and self._should_auto_end_after_agent_turn(translated)
+                ):
+                    self._schedule_auto_end_after_farewell()
             except Exception as exc:
                 logger.error("[%s] translation failed: %s", self.call_sid, exc)
 
         self._track_translation_task(asyncio.create_task(_translate_and_emit()))
 
-        if role == "agent" and self._has_callee_uttered and self._should_auto_end_after_agent_turn(text):
+        if (
+            role == "agent"
+            and self._has_callee_uttered
+            and self._callee_language.code.startswith("en")
+            and self._should_auto_end_after_agent_turn(text)
+        ):
             self._schedule_auto_end_after_farewell()
 
     async def handle_agent_status(self, status: str) -> None:
@@ -560,64 +572,31 @@ class AgentCallManager:
             return False
 
         continuation_markers = (
-            "podria",
-            "puede ",
-            "pueden ",
-            "necesito ",
-            "falta",
             "confirm",
-            "cuando",
-            "donde",
-            "como ",
-            "cual",
-            "cuanto",
             "help you",
             "can you",
             "would you",
             "please",
+            "need ",
+            "needs ",
+            "missing",
+            "when ",
+            "where ",
+            "how ",
+            "which ",
+            "what ",
         )
         if any(marker in normalized for marker in continuation_markers):
             return False
 
         goodbye_markers = (
-            "adios",
-            "hasta luego",
-            "hasta pronto",
-            "me despido",
             "goodbye",
             "bye",
             "have a good day",
             "have a great day",
-            "au revoir",
-            "arrivederci",
-            "tschuss",
-            "tchau",
+            "have a nice day",
         )
         closing_markers = (
-            "eso es todo",
-            "con eso seria todo",
-            "no necesito nada mas",
-            "nada mas por ahora",
-            "quedamos asi",
-            "muchas gracias por su ayuda",
-            "gracias por su tiempo",
-            "gracias a usted",
-            "que tenga un buen dia",
-            "damos la gestion por cerrada",
-            "gestion por cerrada",
-            "asunto cerrado",
-            "materia cerrada",
-            "queda cerrado",
-            "queda cerrada",
-            "doy por cerrado",
-            "doy por cerrada",
-            "voy a cerrar",
-            "cerrare aqui",
-            "cierro la llamada",
-            "terminare la llamada",
-            "termino la llamada",
-            "finalizare aqui",
-            "finalizo aqui",
             "consider the matter closed",
             "matter closed",
             "the matter is closed",
@@ -625,8 +604,18 @@ class AgentCallManager:
             "i'll end the call",
             "i will close here",
             "i'll close here",
-            "have a good day",
-            "have a nice day",
+            "i am going to close",
+            "i'm going to close",
+            "i will close",
+            "i'll close",
+            "i am ending the call",
+            "i'm ending the call",
+            "request is complete",
+            "request has been completed",
+            "nothing else is needed",
+            "that is all",
+            "we are done",
+            "all set",
         )
 
         return any(marker in normalized for marker in goodbye_markers) or any(

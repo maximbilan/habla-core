@@ -249,13 +249,48 @@ def test_should_auto_end_after_agent_turn_detects_closing_phrases():
         ),
     )
 
-    assert manager._should_auto_end_after_agent_turn("Muchas gracias por su tiempo, adios.")
-    assert manager._should_auto_end_after_agent_turn(
+    assert manager._should_auto_end_after_agent_turn("Okay, thank you for everything; we consider the matter closed.")
+    assert manager._should_auto_end_after_agent_turn("Perfect, thank you. Have a good day.")
+    assert manager._should_auto_end_after_agent_turn("I did not receive a response, so I'll end the call.")
+    assert not manager._should_auto_end_after_agent_turn("Muchas gracias por su tiempo, adios.")
+    assert not manager._should_auto_end_after_agent_turn(
         "Vale, gracias por todo; damos la gestión por cerrada."
     )
-    assert manager._should_auto_end_after_agent_turn("Perfecto, gracias a usted. Que tenga un buen día.")
-    assert manager._should_auto_end_after_agent_turn("Okay, thank you for everything; we consider the matter closed.")
-    assert manager._should_auto_end_after_agent_turn("No recibimos respuesta, así que cierro la llamada.")
     assert not manager._should_auto_end_after_agent_turn("¿Puede confirmar la dirección?")
     assert not manager._should_auto_end_after_agent_turn("Necesito confirmar un detalle más.")
-    assert not manager._should_auto_end_after_agent_turn("Si quiere, puedo confirmar otro detalle.")
+    assert not manager._should_auto_end_after_agent_turn("If you want, I can confirm another detail.")
+
+
+def test_handle_transcript_schedules_auto_end_from_translated_agent_turn():
+    manager = AgentCallManager(
+        call_sid="CA_END_TRANSLATED",
+        config=AgentCallConfig(
+            to_number="+12025550100",
+            from_number=None,
+            prompt="Test",
+            user_name="Tester",
+            language="es",
+        ),
+    )
+    manager._has_callee_uttered = True
+    scheduled = []
+
+    async def fake_translate(source_text: str) -> str:
+        return "Okay, thank you for everything; we consider the matter closed."
+
+    def fake_schedule() -> None:
+        scheduled.append(True)
+
+    manager.transcript.translate_to_english = fake_translate  # type: ignore[method-assign]
+    manager._schedule_auto_end_after_farewell = fake_schedule  # type: ignore[method-assign]
+
+    async def _run() -> None:
+        await manager.handle_transcript(
+            "agent",
+            "Vale, gracias por todo; damos la gestión por cerrada.",
+        )
+        await manager._wait_for_translation_tasks(timeout=1.0)
+
+    asyncio.run(_run())
+
+    assert scheduled == [True]
