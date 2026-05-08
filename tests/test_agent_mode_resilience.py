@@ -250,5 +250,12 @@ def test_should_auto_end_after_agent_turn_detects_closing_phrases():
     )
 
     assert manager._should_auto_end_after_agent_turn("Muchas gracias por su tiempo, adios.")
+    assert manager._should_auto_end_after_agent_turn(
+        "Vale, gracias por todo; damos la gestión por cerrada."
+    )
+    assert manager._should_auto_end_after_agent_turn("Perfecto, gracias a usted. Que tenga un buen día.")
+    assert manager._should_auto_end_after_agent_turn("Okay, thank you for everything; we consider the matter closed.")
+    assert manager._should_auto_end_after_agent_turn("No recibimos respuesta, así que cierro la llamada.")
     assert not manager._should_auto_end_after_agent_turn("¿Puede confirmar la dirección?")
     assert not manager._should_auto_end_after_agent_turn("Necesito confirmar un detalle más.")
+    assert not manager._should_auto_end_after_agent_turn("Si quiere, puedo confirmar otro detalle.")
