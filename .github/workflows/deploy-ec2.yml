@@ -71,7 +71,7 @@ jobs:
           PORT="${EC2_PORT:-22}"
           printf '%s\n%s' "${OPENAI_API_KEY}" "${PUBLIC_URL}" | ssh -p "${PORT}" -i ~/.ssh/id_ed25519 \
             "${EC2_USER}@${EC2_HOST}" \
-            "set -euo pipefail; cd \"${EC2_APP_DIR}\"; key=\$(sed -n '1p'); public_url=\$(sed -n '2p'); tmp=\$(mktemp); if [ -f .env ]; then grep -v -E '^(OPENAI_API_KEY|PUBLIC_URL)=' .env > \"\$tmp\" || true; else : > \"\$tmp\"; fi; if [ -s \"\$tmp\" ]; then printf '\n' >> \"\$tmp\"; fi; printf '# Runtime\nPUBLIC_URL=%s\n\n# OpenAI\nOPENAI_API_KEY=%s\n' \"\$public_url\" \"\$key\" >> \"\$tmp\"; mv \"\$tmp\" .env; chmod 600 .env"
+            "set -euo pipefail; cd \"${EC2_APP_DIR}\"; IFS= read -r key; IFS= read -r public_url; tmp=\$(mktemp); if [ -f .env ]; then grep -v -E '^(OPENAI_API_KEY|PUBLIC_URL)=' .env > \"\$tmp\" || true; else : > \"\$tmp\"; fi; if [ -s \"\$tmp\" ]; then printf '\n' >> \"\$tmp\"; fi; printf '# Runtime\nPUBLIC_URL=%s\n\n# OpenAI\nOPENAI_API_KEY=%s\n' \"\$public_url\" \"\$key\" >> \"\$tmp\"; mv \"\$tmp\" .env; chmod 600 .env"
 
       - name: Install deps and restart service
         run: |

@@ -4,7 +4,9 @@ from app.agent.agent_call_manager import (
     AgentCallConfig,
     AgentCallManager,
     MAX_NOVA_RESTART_ATTEMPTS,
+    initiate_agent_outbound_call,
 )
+import app.agent.agent_call_manager as agent_call_manager
 from app.agent.agent_nova_session import AgentNovaSession
 
 
@@ -217,6 +219,22 @@ def test_is_control_transcript_payload_detection():
     assert manager._is_control_transcript_payload('{"event":"interrupt","ok":true}')
     assert not manager._is_control_transcript_payload("Necesito confirmar una cita.")
     assert not manager._is_control_transcript_payload('{"message":"normal content","count":5,"other":"x","extra":"y"}')
+
+
+def test_initiate_agent_outbound_call_rejects_blank_public_url(monkeypatch):
+    monkeypatch.setattr(agent_call_manager, "PUBLIC_URL", "")
+
+    async def _unused(*args, **kwargs):
+        raise AssertionError("should not create Twilio call")
+
+    monkeypatch.setattr(agent_call_manager, "create_outbound_call", _unused)
+
+    try:
+        initiate_agent_outbound_call("+12025550100")
+    except RuntimeError as exc:
+        assert "PUBLIC_URL" in str(exc)
+    else:
+        raise AssertionError("expected PUBLIC_URL validation error")
 
 
 def test_should_auto_end_after_agent_turn_detects_closing_phrases():

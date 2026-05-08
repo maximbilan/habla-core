@@ -23,7 +23,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 
-from app.config import SERVER_HOST, SERVER_PORT, PUBLIC_URL
+from app.config import SERVER_HOST, SERVER_PORT
 from app.models import CallRequest, CallResponse, CallStatusResponse, EndCallResponse
 from app.call_manager import CallManager, CallStatus
 from app.translation_bridge import TranslationBridge
@@ -36,6 +36,7 @@ from app.language_support import (
     supported_languages_payload,
 )
 from app.agent import AgentCallConfig, agent_calls, initiate_agent_outbound_call
+from app.agent.agent_call_manager import agent_media_stream_ws_base
 from app.caller_id.router import router as caller_id_router
 from app.request_auth import (
     auth_enabled,
@@ -340,7 +341,7 @@ async def get_agent_call_status(call_sid: str):
 @app.post("/agent/twilio/webhook/{call_sid}")
 async def agent_twilio_webhook(call_sid: str, request: Request):
     twilio_call_sid = await _extract_twilio_call_sid(request, call_sid)
-    ws_base = PUBLIC_URL.replace("https://", "wss://").replace("http://", "ws://")
+    ws_base = agent_media_stream_ws_base()
 
     response = VoiceResponse()
     connect = Connect()

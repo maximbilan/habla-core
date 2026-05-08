@@ -3,6 +3,7 @@ Twilio voice integration — outbound calls and Media Streams TwiML.
 """
 
 import logging
+from urllib.parse import urlparse
 
 from twilio.twiml.voice_response import VoiceResponse, Connect, Stream
 
@@ -14,10 +15,20 @@ from app.caller_id.service import create_outbound_call, get_twilio_client
 logger = logging.getLogger(__name__)
 
 
+def _normalized_public_url() -> str:
+    public_url = PUBLIC_URL.strip().rstrip("/")
+    parsed = urlparse(public_url)
+    if not public_url or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError(
+            "PUBLIC_URL must be an absolute http(s) URL before starting Twilio calls"
+        )
+    return public_url
+
+
 def _media_stream_ws_url() -> str:
     """Derive the wss:// media-stream URL from PUBLIC_URL."""
     return (
-        PUBLIC_URL
+        _normalized_public_url()
         .replace("https://", "wss://")
         .replace("http://", "ws://")
         + "/twilio/media-stream"

@@ -8,6 +8,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass
+from urllib.parse import urlparse
 from fastapi import WebSocket
 
 from app.agent.agent_bridge import AgentBridge
@@ -35,6 +36,20 @@ RUNTIME_COACHING_COOLDOWN_SECONDS = 0.75
 MAX_RECENT_AGENT_TURNS = 6
 AGENT_REPETITION_WINDOW = 4
 AGENT_REPETITION_SIMILARITY_THRESHOLD = 0.84
+
+
+def _normalized_public_url() -> str:
+    public_url = PUBLIC_URL.strip().rstrip("/")
+    parsed = urlparse(public_url)
+    if not public_url or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError(
+            "PUBLIC_URL must be an absolute http(s) URL before starting Twilio calls"
+        )
+    return public_url
+
+
+def agent_media_stream_ws_base() -> str:
+    return _normalized_public_url().replace("https://", "wss://").replace("http://", "ws://")
 
 
 @dataclass
@@ -626,7 +641,7 @@ def initiate_agent_outbound_call(
         to_number=to_number,
         from_number=from_number,
         device_id=device_id,
-        webhook_url=f"{PUBLIC_URL}/agent/twilio/webhook/pending",
+        webhook_url=f"{_normalized_public_url()}/agent/twilio/webhook/pending",
         method="POST",
     )
     logger.info("Agent outbound call created: sid=%s to=%s", call_sid, to_number)
