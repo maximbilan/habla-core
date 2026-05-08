@@ -67,6 +67,9 @@ class AgentOpenAIRealtimeSession:
         self._ws = None
         self.is_active = False
         self._response_task: asyncio.Task | None = None
+        self._instruction_lock = asyncio.Lock()
+        self._response_active = False
+        self._pending_instructions: list[str] = []
         self._agent_transcript_fragments: dict[str, list[str]] = defaultdict(list)
         self._agent_text_fragments: dict[str, list[str]] = defaultdict(list)
 
@@ -172,8 +175,26 @@ class AgentOpenAIRealtimeSession:
     async def inject_instruction(self, instruction_text: str) -> None:
         if not self.is_active:
             return
-        await self._send(self._text_item_event(instruction_text))
+
+        async with self._instruction_lock:
+            self._pending_instructions.append(instruction_text)
+            await self._dispatch_pending_instructions_locked()
+
+    async def _dispatch_pending_instructions_locked(self) -> None:
+        if not self.is_active:
+            return
+        if self._response_active:
+            return
+
+        while self._pending_instructions:
+            instruction_text = self._pending_instructions.pop(0)
+            await self._send(self._text_item_event(instruction_text))
+
+        if self._response_active or not self.is_active:
+            return
+
         await self._send(self._response_create_event())
+        self._response_active = True
 
     async def _process_responses(self) -> None:
         try:
@@ -242,14 +263,20 @@ class AgentOpenAIRealtimeSession:
             return
 
         if event_type == "response.created":
+            self._response_active = True
             await self._on_agent_status("thinking")
             return
 
         if event_type == "response.done":
+            async with self._instruction_lock:
+                self._response_active = False
+                await self._dispatch_pending_instructions_locked()
             await self._on_agent_status("listening")
             return
 
         if event_type == "error":
+            if event.get("code") == "conversation_already_has_active_response":
+                self._response_active = True
             logger.error("[%s] OpenAI agent error: %s", self.session_id, event)
 
     async def _emit_agent_transcript(self, event: dict) -> None:

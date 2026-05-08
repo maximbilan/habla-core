@@ -149,3 +149,35 @@ def test_agent_session_emits_audio_and_transcripts_from_events():
     assert audio == [b"audio"]
     assert transcripts == [("callee", "Hola"), ("agent", "Buenos dias")]
     assert statuses == ["speaking"]
+
+
+def test_agent_session_queues_instruction_until_active_response_finishes():
+    session = AgentOpenAIRealtimeSession(
+        session_id="agent-CA123",
+        system_prompt="Call the restaurant.",
+        callee_language="es-US",
+        on_audio_output=_noop_audio,
+        on_transcript=_noop_transcript,
+        on_agent_status=_noop_status,
+    )
+    session.is_active = True
+    session._response_active = True
+    sent_events: list[dict] = []
+
+    async def capture_send(event: dict) -> None:
+        sent_events.append(event)
+
+    session._send = capture_send  # type: ignore[method-assign]
+
+    async def run() -> None:
+        await session.inject_instruction("Say hello.")
+        assert sent_events == []
+        await session._handle_event({"type": "response.done"})
+
+    asyncio.run(run())
+
+    assert [event["type"] for event in sent_events] == [
+        "conversation.item.create",
+        "response.create",
+    ]
+    assert session._response_active is True
