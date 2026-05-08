@@ -69,7 +69,7 @@ class AgentOpenAIRealtimeSession:
         self._response_task: asyncio.Task | None = None
         self._instruction_lock = asyncio.Lock()
         self._response_active = False
-        self._pending_instructions: list[str] = []
+        self._pending_instructions: list[tuple[str, bool]] = []
         self._agent_transcript_fragments: dict[str, list[str]] = defaultdict(list)
         self._agent_text_fragments: dict[str, list[str]] = defaultdict(list)
 
@@ -116,7 +116,7 @@ class AgentOpenAIRealtimeSession:
                         },
                         "turn_detection": {
                             "type": "server_vad",
-                            "create_response": True,
+                            "create_response": False,
                             "interrupt_response": True,
                             "prefix_padding_ms": 300,
                             "silence_duration_ms": 500,
@@ -172,12 +172,12 @@ class AgentOpenAIRealtimeSession:
             return
         await self._send(self._audio_append_event(pcm_audio))
 
-    async def inject_instruction(self, instruction_text: str) -> None:
+    async def inject_instruction(self, instruction_text: str, *, trigger_response: bool = True) -> None:
         if not self.is_active:
             return
 
         async with self._instruction_lock:
-            self._pending_instructions.append(instruction_text)
+            self._pending_instructions.append((instruction_text, trigger_response))
             await self._dispatch_pending_instructions_locked()
 
     async def _dispatch_pending_instructions_locked(self) -> None:
@@ -186,13 +186,20 @@ class AgentOpenAIRealtimeSession:
         if self._response_active:
             return
 
+        should_create_response = False
         while self._pending_instructions:
-            instruction_text = self._pending_instructions.pop(0)
+            instruction_text, trigger_response = self._pending_instructions.pop(0)
             await self._send(self._text_item_event(instruction_text))
+            should_create_response = should_create_response or trigger_response
 
-        if self._response_active or not self.is_active:
+        if not should_create_response or self._response_active or not self.is_active:
             return
 
+        await self._create_response_locked()
+
+    async def _create_response_locked(self) -> None:
+        if self._response_active or not self.is_active:
+            return
         await self._send(self._response_create_event())
         self._response_active = True
 
@@ -252,6 +259,9 @@ class AgentOpenAIRealtimeSession:
             transcript = str(event.get("transcript", "")).strip()
             if transcript:
                 await self._on_transcript("callee", transcript)
+                async with self._instruction_lock:
+                    await self._dispatch_pending_instructions_locked()
+                    await self._create_response_locked()
             return
 
         if event_type == "input_audio_buffer.speech_started":

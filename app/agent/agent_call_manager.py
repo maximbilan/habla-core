@@ -436,7 +436,10 @@ class AgentCallManager:
 
         self._last_runtime_coaching_monotonic = now
         try:
-            await self.nova_session.inject_instruction(instruction.strip())
+            await self.nova_session.inject_instruction(
+                instruction.strip(),
+                trigger_response=False,
+            )
         except Exception as exc:
             logger.error("[%s] failed injecting runtime instruction: %s", self.call_sid, exc)
 

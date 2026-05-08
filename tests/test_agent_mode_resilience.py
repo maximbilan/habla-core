@@ -28,7 +28,7 @@ class FakeActiveNovaSession:
         self.instructions: list[str] = []
         self.audio_chunks: list[bytes] = []
 
-    async def inject_instruction(self, instruction_text: str) -> None:
+    async def inject_instruction(self, instruction_text: str, *, trigger_response: bool = True) -> None:
         self.instructions.append(instruction_text)
 
     async def send_audio(self, pcm_audio: bytes) -> None:

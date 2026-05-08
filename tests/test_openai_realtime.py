@@ -60,6 +60,7 @@ def test_agent_session_update_configures_audio_and_transcription():
     assert config["output_modalities"] == ["audio"]
     assert config["audio"]["input"]["format"] == {"type": "audio/pcm", "rate": 24000}
     assert config["audio"]["input"]["transcription"]["language"] == "fr"
+    assert config["audio"]["input"]["turn_detection"]["create_response"] is False
     assert config["audio"]["output"]["format"] == {"type": "audio/pcm", "rate": 24000}
     assert config["audio"]["output"]["voice"] == "cedar"
 
@@ -180,4 +181,64 @@ def test_agent_session_queues_instruction_until_active_response_finishes():
         "conversation.item.create",
         "response.create",
     ]
+    assert session._response_active is True
+
+
+def test_agent_session_context_instruction_does_not_create_response():
+    session = AgentOpenAIRealtimeSession(
+        session_id="agent-CA123",
+        system_prompt="Call the restaurant.",
+        callee_language="es-US",
+        on_audio_output=_noop_audio,
+        on_transcript=_noop_transcript,
+        on_agent_status=_noop_status,
+    )
+    session.is_active = True
+    sent_events: list[dict] = []
+
+    async def capture_send(event: dict) -> None:
+        sent_events.append(event)
+
+    session._send = capture_send  # type: ignore[method-assign]
+
+    asyncio.run(session.inject_instruction("Do not repeat.", trigger_response=False))
+
+    assert [event["type"] for event in sent_events] == ["conversation.item.create"]
+    assert session._response_active is False
+
+
+def test_agent_session_responds_after_callee_transcript():
+    transcripts: list[tuple[str, str]] = []
+
+    async def capture_transcript(role: str, text: str) -> None:
+        transcripts.append((role, text))
+
+    session = AgentOpenAIRealtimeSession(
+        session_id="agent-CA123",
+        system_prompt="Call the restaurant.",
+        callee_language="es-US",
+        on_audio_output=_noop_audio,
+        on_transcript=capture_transcript,
+        on_agent_status=_noop_status,
+    )
+    session.is_active = True
+    sent_events: list[dict] = []
+
+    async def capture_send(event: dict) -> None:
+        sent_events.append(event)
+
+    session._send = capture_send  # type: ignore[method-assign]
+
+    async def run() -> None:
+        await session._handle_event(
+            {
+                "type": "conversation.item.input_audio_transcription.completed",
+                "transcript": "Si, lo escucho.",
+            }
+        )
+
+    asyncio.run(run())
+
+    assert transcripts == [("callee", "Si, lo escucho.")]
+    assert [event["type"] for event in sent_events] == ["response.create"]
     assert session._response_active is True
