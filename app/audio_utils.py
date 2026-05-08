@@ -2,7 +2,7 @@
 Audio codec conversion utilities.
 
 Handles mulaw <-> PCM conversion and sample rate resampling for the
-Twilio (mulaw 8 kHz) <-> Nova 2 Sonic (PCM 16 kHz in / 24 kHz out) <-> iOS (PCM 16 kHz)
+Twilio (mulaw 8 kHz) <-> model audio (PCM 24 kHz) <-> iOS (PCM 16 kHz)
 audio pipeline.
 """
 
@@ -41,19 +41,30 @@ def resample(pcm_data: bytes, from_rate: int, to_rate: int) -> bytes:
 # ---------------------------------------------------------------------------
 
 def mulaw_8k_to_pcm_16k(mulaw_data: bytes) -> bytes:
-    """Twilio mulaw 8 kHz  ->  PCM 16-bit 16 kHz (Nova input)."""
+    """Twilio mulaw 8 kHz  ->  PCM 16-bit 16 kHz."""
     pcm_8k = mulaw_to_pcm(mulaw_data)
     return resample(pcm_8k, 8000, 16000)
 
 
+def mulaw_8k_to_pcm_24k(mulaw_data: bytes) -> bytes:
+    """Twilio mulaw 8 kHz  ->  PCM 16-bit 24 kHz (OpenAI input)."""
+    pcm_8k = mulaw_to_pcm(mulaw_data)
+    return resample(pcm_8k, 8000, 24000)
+
+
+def pcm_16k_to_pcm_24k(pcm_16k: bytes) -> bytes:
+    """PCM 16-bit 16 kHz  ->  PCM 16-bit 24 kHz."""
+    return resample(pcm_16k, 16000, 24000)
+
+
 def pcm_24k_to_mulaw_8k(pcm_24k: bytes) -> bytes:
-    """Nova output PCM 24 kHz  ->  mulaw 8 kHz (Twilio playback)."""
+    """Model output PCM 24 kHz  ->  mulaw 8 kHz (Twilio playback)."""
     pcm_8k = resample(pcm_24k, 24000, 8000)
     return pcm_to_mulaw(pcm_8k)
 
 
 def pcm_24k_to_pcm_16k(pcm_24k: bytes) -> bytes:
-    """Nova output PCM 24 kHz  ->  PCM 16 kHz (iOS app speaker)."""
+    """Model output PCM 24 kHz  ->  PCM 16 kHz (iOS app speaker)."""
     return resample(pcm_24k, 24000, 16000)
 
 

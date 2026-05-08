@@ -12,7 +12,7 @@
 flowchart LR
     iOS[iOS Client] <-- REST + WS --> API[FastAPI app.main]
     API <-- Twilio Voice + Media Streams --> Twilio[(Twilio)]
-    API <-- Bidirectional stream --> Nova[(Amazon Nova 2 Sonic)]
+    API <-- Realtime WebSocket --> OpenAI[(OpenAI Realtime)]
     API <-- Ownership API --> Accounts[habla-accounts]
 ```
 
@@ -23,7 +23,7 @@ Main modules:
 - `app/main.py`: route definitions and WS endpoints
 - `app/call_manager.py`: in-memory translation call registry
 - `app/translation_bridge.py`: dual-session audio routing pipeline
-- `app/nova_sonic.py`: Nova bidirectional session wrapper
+- `app/openai_realtime.py`: OpenAI realtime translation session wrapper
 - `app/agent/*`: agent-mode lifecycle, transcript, critical-info tracking
 - `app/caller_id/*`: Twilio caller-id + ownership integration
 - `app/request_auth.py`: REST/WS authorization and device-id helpers
@@ -43,21 +43,21 @@ Per active translation call, `TranslationBridge` runs two model sessions:
 sequenceDiagram
     participant iOS
     participant Core as habla-core
-    participant NovaA as Nova Session A
-    participant NovaB as Nova Session B
+    participant OaiA as OpenAI Translate A
+    participant OaiB as OpenAI Translate B
     participant Twilio
     participant Callee
 
     iOS->>Core: WS /ws/{call_sid} PCM16@16k
-    Core->>NovaA: audio input
-    NovaA-->>Core: translated PCM output
+    Core->>OaiA: PCM16@24k audio input
+    OaiA-->>Core: translated PCM16@24k output
     Core->>Twilio: media stream mulaw@8k
     Twilio->>Callee: PSTN audio
 
     Callee->>Twilio: PSTN speech
     Twilio-->>Core: WS /twilio/media-stream mulaw@8k
-    Core->>NovaB: resampled PCM16@16k
-    NovaB-->>Core: translated PCM output
+    Core->>OaiB: PCM16@24k audio input
+    OaiB-->>Core: translated PCM16@24k output
     Core-->>iOS: PCM16@16k
 ```
 
@@ -95,7 +95,7 @@ Agent mode is implemented independently from translation call bridge (`app/agent
 Core components:
 
 - `AgentCallManager`: state machine + orchestration
-- `AgentNovaSession`: model session for autonomous dialog
+- `AgentOpenAIRealtimeSession`: `gpt-realtime-2` session for autonomous dialog
 - `TranscriptService`: transcript + async EN translation
 - `CriticalInfoTracker`: high-risk extraction, confirmations, verified summary
 
@@ -109,7 +109,7 @@ sequenceDiagram
     participant API as FastAPI (app.main)
     participant Twilio as Twilio Voice + Media Streams
     participant Manager as AgentCallManager
-    participant Nova as AgentNovaSession (Nova 2 Sonic)
+    participant OpenAI as AgentOpenAIRealtimeSession (gpt-realtime-2)
     participant Transcript as TranscriptService
     participant FactTracker as CriticalInfoTracker
 
@@ -121,12 +121,12 @@ sequenceDiagram
     API-->>Twilio: TwiML Connect/Stream
     Twilio->>API: WS /agent/twilio/media-stream/{call_sid}
     API->>Manager: on_twilio_start(stream_sid)
-    Manager->>Nova: ensure_nova_session()
+    Manager->>OpenAI: ensure model session
 
     Twilio->>API: media payload (mulaw 8k)
     API->>Manager: handle_twilio_media(payload)
-    Manager->>Nova: send_audio(pcm 16k)
-    Nova-->>Manager: audioOutput + textOutput + status events
+    Manager->>OpenAI: send_audio(PCM16@24k)
+    OpenAI-->>Manager: audio deltas + transcript/status events
     Manager-->>Twilio: agent audio (mulaw 8k)
 
     iOS->>API: WS /agent/ws/{call_sid}

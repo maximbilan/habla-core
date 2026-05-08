@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# AWS
+# AWS (legacy Nova wrappers kept in repo, inactive in OpenAI runtime path)
 # ---------------------------------------------------------------------------
 # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are read from the environment
 # automatically by the Smithy SDK's EnvironmentCredentialsResolver in
@@ -45,10 +45,36 @@ HABLA_SECRET = os.getenv("HABLA_SECRET", "").strip()
 HABLA_APP_BUNDLE_ID = os.getenv("HABLA_APP_BUNDLE_ID", "com.maximbilan.habla-ios").strip()
 
 # ---------------------------------------------------------------------------
-# Nova 2 Sonic
+# Nova 2 Sonic (legacy)
 # ---------------------------------------------------------------------------
 NOVA_MODEL_ID = "amazon.nova-2-sonic-v1:0"
 
-# Audio constants
-INPUT_SAMPLE_RATE = 16000   # PCM input to Nova
-OUTPUT_SAMPLE_RATE = 24000  # PCM output from Nova
+# ---------------------------------------------------------------------------
+# OpenAI Realtime
+# ---------------------------------------------------------------------------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_REALTIME_TRANSLATE_MODEL = os.getenv(
+    "OPENAI_REALTIME_TRANSLATE_MODEL",
+    "gpt-realtime-translate",
+).strip()
+OPENAI_REALTIME_AGENT_MODEL = os.getenv(
+    "OPENAI_REALTIME_AGENT_MODEL",
+    "gpt-realtime-2",
+).strip()
+OPENAI_REALTIME_AGENT_VOICE = os.getenv(
+    "OPENAI_REALTIME_AGENT_VOICE",
+    "cedar",
+).strip()
+OPENAI_REALTIME_AGENT_TRANSCRIPTION_MODEL = os.getenv(
+    "OPENAI_REALTIME_AGENT_TRANSCRIPTION_MODEL",
+    "gpt-4o-mini-transcribe",
+).strip()
+OPENAI_TEXT_TRANSLATION_MODEL = os.getenv(
+    "OPENAI_TEXT_TRANSLATION_MODEL",
+    "gpt-5.4-mini",
+).strip()
+OPENAI_AUDIO_SAMPLE_RATE = int(os.getenv("OPENAI_AUDIO_SAMPLE_RATE", "24000"))
+
+# Audio constants for legacy Nova wrappers
+INPUT_SAMPLE_RATE = 16000
+OUTPUT_SAMPLE_RATE = 24000

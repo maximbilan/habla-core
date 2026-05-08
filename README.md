@@ -1,6 +1,6 @@
 # Habla Core
 
-AWS/Nova backend for Habla app.
+OpenAI Realtime backend for Habla app.
 
 This service supports both iOS modes:
 
@@ -14,7 +14,7 @@ Direct Agent Mode flow diagram: [`architecture.md#61-agent-mode-runtime-sequence
 
 ### Live Call Mode (fast audio path)
 
-- Uses two Amazon Nova 2 Sonic sessions per call:
+- Uses two OpenAI `gpt-realtime-translate` sessions per call:
   - iOS -> callee language (to Twilio/PSTN)
   - callee -> iOS language (back to app)
 - Streams audio in both directions continuously
@@ -22,13 +22,13 @@ Direct Agent Mode flow diagram: [`architecture.md#61-agent-mode-runtime-sequence
 
 ### Agent Mode
 
-- Twilio call orchestration with model-driven agent conversation.
+- Twilio call orchestration with `gpt-realtime-2` model-driven agent conversation.
 - WebSocket events for:
   - call status
   - agent status (`listening/thinking/speaking`)
   - transcript and transcript updates
   - critical confirmations
-  - verified facts summar.
+  - verified facts summary
 
 ### Caller ID Isolation
 
@@ -100,7 +100,7 @@ cp .env.example .env
 
 Required groups:
 
-- AWS credentials + `AWS_REGION`
+- `OPENAI_API_KEY`
 - Twilio credentials + `TWILIO_FROM_NUMBER`
 - `PUBLIC_URL` reachable by Twilio
 
@@ -108,6 +108,9 @@ Optional/conditional:
 
 - `HABLA_SECRET`, `HABLA_APP_BUNDLE_ID`
 - `HABLA_ACCOUNTS_BASE_URL`, `HABLA_ACCOUNTS_SERVICE_TOKEN`, `HABLA_ACCOUNTS_TIMEOUT_SECONDS`
+- `OPENAI_REALTIME_TRANSLATE_MODEL`, `OPENAI_REALTIME_AGENT_MODEL`
+- `OPENAI_REALTIME_AGENT_VOICE`, `OPENAI_REALTIME_AGENT_TRANSCRIPTION_MODEL`
+- `OPENAI_TEXT_TRANSLATION_MODEL`
 
 ### 3) Run
 
@@ -143,6 +146,7 @@ app/
   models.py
   call_manager.py
   translation_bridge.py
+  openai_realtime.py
   nova_sonic.py
   audio_utils.py
   request_auth.py
@@ -151,3 +155,5 @@ app/
   caller_id/
   agent/
 ```
+
+`nova_sonic.py` and `agent/agent_nova_session.py` remain in the tree as legacy wrappers, but the active runtime path uses OpenAI Realtime.
