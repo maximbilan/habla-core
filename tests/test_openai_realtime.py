@@ -96,7 +96,7 @@ def test_agent_bridge_resamples_twilio_payload_to_openai_pcm24():
     async def capture(audio: bytes) -> None:
         sent.append(audio)
 
-    asyncio.run(bridge.forward_twilio_media_to_nova(payload, capture))
+    asyncio.run(bridge.forward_twilio_media_to_openai(payload, capture))
 
     assert len(sent) == 1
     assert 900 <= len(sent[0]) <= 960

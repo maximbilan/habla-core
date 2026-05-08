@@ -27,8 +27,8 @@ from app.agent.critical_info import CriticalInfoTracker
 
 logger = logging.getLogger(__name__)
 
-MAX_NOVA_RESTART_ATTEMPTS = 5
-MIN_NOVA_RESTART_INTERVAL_SECONDS = 1.5
+MAX_OPENAI_RESTART_ATTEMPTS = 5
+MIN_OPENAI_RESTART_INTERVAL_SECONDS = 1.5
 TRANSCRIPT_DUPLICATE_SUPPRESSION_SECONDS = 20.0
 AUTO_END_AFTER_FAREWELL_SECONDS = 5.0
 LISTEN_FIRST_GUIDANCE_MIN_INTERVAL_SECONDS = 1.2
@@ -79,16 +79,16 @@ class AgentCallManager:
             )
         self._callee_language = resolved_language
 
-        self.nova_session: AgentOpenAIRealtimeSession | None = None
+        self.openai_session: AgentOpenAIRealtimeSession | None = None
         self.ios_websocket: WebSocket | None = None
         self.bridge = AgentBridge(call_sid)
         self.transcript = TranscriptService(source_language_label=self._callee_language.label)
 
         self._ending = False
         self._end_lock = asyncio.Lock()
-        self._nova_start_lock = asyncio.Lock()
-        self._nova_restart_attempts = 0
-        self._last_nova_start_monotonic = 0.0
+        self._openai_start_lock = asyncio.Lock()
+        self._openai_restart_attempts = 0
+        self._last_openai_start_monotonic = 0.0
         self._opening_instruction_sent = False
         self._recent_transcript_emit_monotonic: dict[str, float] = {}
         self._auto_end_task: asyncio.Task | None = None
@@ -149,10 +149,10 @@ class AgentCallManager:
         self.status = "connected"
         await self._send_ios({"type": "status", "status": "connected"})
 
-        if not self.nova_session or not self.nova_session.is_active:
-            await self.ensure_nova_session()
+        if not self.openai_session or not self.openai_session.is_active:
+            await self.ensure_openai_session()
 
-    async def start_nova_session(self) -> None:
+    async def start_openai_session(self) -> None:
         system_prompt = build_agent_prompt(
             self.config.prompt,
             self.config.user_name,
@@ -160,37 +160,37 @@ class AgentCallManager:
             callee_language_label=self._callee_language.label,
         )
 
-        self.nova_session = AgentOpenAIRealtimeSession(
+        self.openai_session = AgentOpenAIRealtimeSession(
             session_id=f"agent-{self.call_sid}",
             system_prompt=system_prompt,
             callee_language=self._callee_language.code,
-            on_audio_output=self.handle_nova_audio,
+            on_audio_output=self.handle_openai_audio,
             on_transcript=self.handle_transcript,
             on_agent_status=self.handle_agent_status,
         )
-        await self.nova_session.start()
+        await self.openai_session.start()
 
         # Kick off the conversation only once per call to avoid repeated monologues
         # after session restarts.
         if not self._opening_instruction_sent:
-            await self.nova_session.inject_instruction(
+            await self.openai_session.inject_instruction(
                 "The call is connected. Start with a brief greeting and the specific request from the user. Keep it to one concise turn, ask at most one focused question, then pause and wait for the callee. Do not ask 'How can I help you?'. Do not mention translation, interpreters, system details, or delays unless explicitly asked."
             )
             self._opening_instruction_sent = True
 
-    async def ensure_nova_session(self) -> bool:
-        async with self._nova_start_lock:
-            if self.nova_session and self.nova_session.is_active:
+    async def ensure_openai_session(self) -> bool:
+        async with self._openai_start_lock:
+            if self.openai_session and self.openai_session.is_active:
                 return True
 
             loop = asyncio.get_running_loop()
             now = loop.time()
 
-            if self._nova_restart_attempts >= MAX_NOVA_RESTART_ATTEMPTS:
+            if self._openai_restart_attempts >= MAX_OPENAI_RESTART_ATTEMPTS:
                 logger.error(
                     "[%s] OpenAI session restart limit reached (%d attempts)",
                     self.call_sid,
-                    self._nova_restart_attempts,
+                    self._openai_restart_attempts,
                 )
                 self.status = "failed"
                 await self._send_ios({"type": "status", "status": "failed"})
@@ -198,16 +198,16 @@ class AgentCallManager:
 
             # Prevent a tight restart loop when OpenAI fails immediately.
             if (
-                self._last_nova_start_monotonic > 0
-                and now - self._last_nova_start_monotonic < MIN_NOVA_RESTART_INTERVAL_SECONDS
+                self._last_openai_start_monotonic > 0
+                and now - self._last_openai_start_monotonic < MIN_OPENAI_RESTART_INTERVAL_SECONDS
             ):
                 return False
 
-            self._nova_restart_attempts += 1
-            self._last_nova_start_monotonic = now
+            self._openai_restart_attempts += 1
+            self._last_openai_start_monotonic = now
 
             try:
-                await self.start_nova_session()
+                await self.start_openai_session()
                 return True
             except Exception as exc:
                 logger.error("[%s] failed to start/restart OpenAI session: %s", self.call_sid, exc)
@@ -216,13 +216,13 @@ class AgentCallManager:
                 return False
 
     async def handle_twilio_media(self, payload: str) -> None:
-        if not await self.ensure_nova_session():
+        if not await self.ensure_openai_session():
             return
 
-        await self.bridge.forward_twilio_media_to_nova(payload, self.nova_session.send_audio)
+        await self.bridge.forward_twilio_media_to_openai(payload, self.openai_session.send_audio)
 
-    async def handle_nova_audio(self, audio_data: bytes) -> None:
-        await self.bridge.forward_nova_audio_to_twilio(audio_data)
+    async def handle_openai_audio(self, audio_data: bytes) -> None:
+        await self.bridge.forward_openai_audio_to_twilio(audio_data)
 
     async def handle_transcript(self, role: str, text_original: str) -> None:
         text = text_original.strip()
@@ -317,8 +317,8 @@ class AgentCallManager:
     async def inject_instruction(self, instruction: str) -> None:
         if not instruction.strip():
             return
-        if await self.ensure_nova_session():
-            await self.nova_session.inject_instruction(instruction.strip())
+        if await self.ensure_openai_session():
+            await self.openai_session.inject_instruction(instruction.strip())
 
     async def end_conversation(self, farewell_instruction: str) -> None:
         await self.inject_instruction(
@@ -342,9 +342,9 @@ class AgentCallManager:
             except Exception:
                 pass
 
-            if self.nova_session:
+            if self.openai_session:
                 try:
-                    await self.nova_session.stop()
+                    await self.openai_session.stop()
                 except Exception as exc:
                     logger.error("[%s] error closing OpenAI session: %s", self.call_sid, exc)
 
@@ -435,7 +435,7 @@ class AgentCallManager:
     async def _inject_runtime_instruction(self, instruction: str, *, force: bool) -> None:
         if not instruction.strip():
             return
-        if not self.nova_session or not self.nova_session.is_active:
+        if not self.openai_session or not self.openai_session.is_active:
             return
 
         now = asyncio.get_running_loop().time()
@@ -448,7 +448,7 @@ class AgentCallManager:
 
         self._last_runtime_coaching_monotonic = now
         try:
-            await self.nova_session.inject_instruction(
+            await self.openai_session.inject_instruction(
                 instruction.strip(),
                 trigger_response=False,
             )

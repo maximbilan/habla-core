@@ -18,7 +18,7 @@ class SupportedLanguage:
         return f"{self.name} ({self.locale})"
 
 
-SUPPORTED_NOVA_LANGUAGES: dict[str, SupportedLanguage] = {
+SUPPORTED_LANGUAGES: dict[str, SupportedLanguage] = {
     "en-US": SupportedLanguage("en-US", "English", "US", "matthew"),
     "en-GB": SupportedLanguage("en-GB", "English", "UK", "amy"),
     "en-AU": SupportedLanguage("en-AU", "English", "Australia", "olivia"),
@@ -37,7 +37,7 @@ _VOICE_IDS_TYPICALLY_FEMALE = {
     "kiara",
     "lupe",
 }
-_MALE_FALLBACK_VOICE_ID = os.getenv("NOVA_VOICE_ID_EN", "matthew").strip() or "matthew"
+_MALE_FALLBACK_VOICE_ID = os.getenv("OPENAI_VOICE_ID_EN", "matthew").strip() or "matthew"
 
 VOICE_ID_BY_LANGUAGE_MALE: dict[str, str] = {
     # Some locale defaults are female-only in practice; use a known male fallback
@@ -47,12 +47,12 @@ VOICE_ID_BY_LANGUAGE_MALE: dict[str, str] = {
         if language.default_voice_id in _VOICE_IDS_TYPICALLY_FEMALE
         else language.default_voice_id
     )
-    for code, language in SUPPORTED_NOVA_LANGUAGES.items()
+    for code, language in SUPPORTED_LANGUAGES.items()
 }
 
 VOICE_ID_BY_LANGUAGE_FEMALE: dict[str, str] = {
     code: language.default_voice_id
-    for code, language in SUPPORTED_NOVA_LANGUAGES.items()
+    for code, language in SUPPORTED_LANGUAGES.items()
 }
 VOICE_ID_BY_LANGUAGE_FEMALE["en-US"] = "amy"
 
@@ -84,15 +84,15 @@ def normalize_language_code(code: str) -> str:
 def resolve_supported_language(code: str) -> SupportedLanguage | None:
     normalized = normalize_language_code(code)
 
-    direct = SUPPORTED_NOVA_LANGUAGES.get(normalized)
+    direct = SUPPORTED_LANGUAGES.get(normalized)
     if direct:
         return direct
 
     lower_normalized = normalized.lower()
     if lower_normalized in LANGUAGE_ALIASES:
-        return SUPPORTED_NOVA_LANGUAGES[LANGUAGE_ALIASES[lower_normalized]]
+        return SUPPORTED_LANGUAGES[LANGUAGE_ALIASES[lower_normalized]]
 
-    for candidate_code, candidate in SUPPORTED_NOVA_LANGUAGES.items():
+    for candidate_code, candidate in SUPPORTED_LANGUAGES.items():
         if candidate_code.lower() == lower_normalized:
             return candidate
 
@@ -117,8 +117,8 @@ def resolve_translation_languages(
 
 
 def build_translation_system_prompt(source_language: str, target_language: str) -> str:
-    source = SUPPORTED_NOVA_LANGUAGES[source_language]
-    target = SUPPORTED_NOVA_LANGUAGES[target_language]
+    source = SUPPORTED_LANGUAGES[source_language]
+    target = SUPPORTED_LANGUAGES[target_language]
     return (
         "You are a real-time speech translator. "
         f"Translate spoken {source.label} into natural {target.label}. "
@@ -130,7 +130,7 @@ def build_translation_system_prompt(source_language: str, target_language: str) 
 
 
 def default_voice_id_for_language(language_code: str) -> str:
-    return SUPPORTED_NOVA_LANGUAGES[language_code].default_voice_id
+    return SUPPORTED_LANGUAGES[language_code].default_voice_id
 
 
 def normalize_voice_gender(voice_gender: str | None) -> str | None:
@@ -172,7 +172,7 @@ def supported_languages_payload() -> list[dict[str, str]]:
             "locale": language.locale,
             "default_voice_id": language.default_voice_id,
         }
-        for language in SUPPORTED_NOVA_LANGUAGES.values()
+        for language in SUPPORTED_LANGUAGES.values()
     ]
 
 

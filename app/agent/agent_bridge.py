@@ -27,13 +27,13 @@ class AgentBridge:
         self.twilio_ws = ws
         self.stream_sid = stream_sid
 
-    async def forward_twilio_media_to_nova(self, payload: str, send_audio_cb) -> None:
+    async def forward_twilio_media_to_openai(self, payload: str, send_audio_cb) -> None:
         """Twilio mulaw 8k payload -> OpenAI PCM 24k."""
         mulaw = decode_twilio_media(payload)
         pcm_24k = mulaw_8k_to_pcm_24k(mulaw)
         await send_audio_cb(pcm_24k)
 
-    async def forward_nova_audio_to_twilio(self, pcm_24k: bytes) -> None:
+    async def forward_openai_audio_to_twilio(self, pcm_24k: bytes) -> None:
         """OpenAI PCM 24k -> Twilio mulaw 8k payload."""
         if not self.twilio_ws or not self.stream_sid:
             return

@@ -4,14 +4,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# AWS (legacy Nova wrappers kept in repo, inactive in OpenAI runtime path)
-# ---------------------------------------------------------------------------
-# AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are read from the environment
-# automatically by the Smithy SDK's EnvironmentCredentialsResolver in
-# nova_sonic.py.  load_dotenv() above ensures .env values are available.
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-
-# ---------------------------------------------------------------------------
 # Twilio
 # ---------------------------------------------------------------------------
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
@@ -45,11 +37,6 @@ HABLA_SECRET = os.getenv("HABLA_SECRET", "").strip()
 HABLA_APP_BUNDLE_ID = os.getenv("HABLA_APP_BUNDLE_ID", "com.maximbilan.habla-ios").strip()
 
 # ---------------------------------------------------------------------------
-# Nova 2 Sonic (legacy)
-# ---------------------------------------------------------------------------
-NOVA_MODEL_ID = "amazon.nova-2-sonic-v1:0"
-
-# ---------------------------------------------------------------------------
 # OpenAI Realtime
 # ---------------------------------------------------------------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
@@ -75,6 +62,6 @@ OPENAI_TEXT_TRANSLATION_MODEL = os.getenv(
 ).strip()
 OPENAI_AUDIO_SAMPLE_RATE = int(os.getenv("OPENAI_AUDIO_SAMPLE_RATE", "24000"))
 
-# Audio constants for legacy Nova wrappers
+# Audio constants
 INPUT_SAMPLE_RATE = 16000
 OUTPUT_SAMPLE_RATE = 24000

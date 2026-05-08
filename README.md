@@ -147,7 +147,6 @@ app/
   call_manager.py
   translation_bridge.py
   openai_realtime.py
-  nova_sonic.py
   audio_utils.py
   request_auth.py
   twilio_handler.py
@@ -155,5 +154,3 @@ app/
   caller_id/
   agent/
 ```
-
-`nova_sonic.py` and `agent/agent_nova_session.py` remain in the tree as legacy wrappers, but the active runtime path uses OpenAI Realtime.
