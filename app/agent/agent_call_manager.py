@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from fastapi import WebSocket
 
 from app.agent.agent_bridge import AgentBridge
-from app.agent.agent_nova_session import AgentNovaSession
+from app.agent.agent_openai_session import AgentOpenAIRealtimeSession
 from app.agent.prompts import build_agent_prompt
 from app.agent.transcript import TranscriptService
 from app.config import (
@@ -21,7 +21,6 @@ from app.caller_id.service import create_outbound_call, get_twilio_client
 from app.language_support import (
     DEFAULT_TARGET_LANGUAGE,
     resolve_supported_language,
-    voice_id_for_language,
 )
 from app.agent.critical_info import CriticalInfoTracker
 
@@ -49,7 +48,7 @@ class AgentCallConfig:
 
 
 class AgentCallManager:
-    """Orchestrates Twilio stream, Nova stream, and iOS text websocket."""
+    """Orchestrates Twilio stream, OpenAI Realtime stream, and iOS text websocket."""
 
     def __init__(self, call_sid: str, config: AgentCallConfig) -> None:
         self.call_sid = call_sid
@@ -65,7 +64,7 @@ class AgentCallManager:
             )
         self._callee_language = resolved_language
 
-        self.nova_session: AgentNovaSession | None = None
+        self.nova_session: AgentOpenAIRealtimeSession | None = None
         self.ios_websocket: WebSocket | None = None
         self.bridge = AgentBridge(call_sid)
         self.transcript = TranscriptService(source_language_label=self._callee_language.label)
@@ -146,10 +145,10 @@ class AgentCallManager:
             callee_language_label=self._callee_language.label,
         )
 
-        self.nova_session = AgentNovaSession(
+        self.nova_session = AgentOpenAIRealtimeSession(
             session_id=f"agent-{self.call_sid}",
             system_prompt=system_prompt,
-            voice_id=self._voice_id_for_language(self._callee_language.code),
+            callee_language=self._callee_language.code,
             on_audio_output=self.handle_nova_audio,
             on_transcript=self.handle_transcript,
             on_agent_status=self.handle_agent_status,
@@ -174,7 +173,7 @@ class AgentCallManager:
 
             if self._nova_restart_attempts >= MAX_NOVA_RESTART_ATTEMPTS:
                 logger.error(
-                    "[%s] Nova session restart limit reached (%d attempts)",
+                    "[%s] OpenAI session restart limit reached (%d attempts)",
                     self.call_sid,
                     self._nova_restart_attempts,
                 )
@@ -182,7 +181,7 @@ class AgentCallManager:
                 await self._send_ios({"type": "status", "status": "failed"})
                 return False
 
-            # Prevent a tight restart loop when Nova fails immediately.
+            # Prevent a tight restart loop when OpenAI fails immediately.
             if (
                 self._last_nova_start_monotonic > 0
                 and now - self._last_nova_start_monotonic < MIN_NOVA_RESTART_INTERVAL_SECONDS
@@ -196,7 +195,7 @@ class AgentCallManager:
                 await self.start_nova_session()
                 return True
             except Exception as exc:
-                logger.error("[%s] failed to start/restart Nova session: %s", self.call_sid, exc)
+                logger.error("[%s] failed to start/restart OpenAI session: %s", self.call_sid, exc)
                 self.status = "failed"
                 await self._send_ios({"type": "status", "status": "failed"})
                 return False
@@ -320,7 +319,7 @@ class AgentCallManager:
                 try:
                     await self.nova_session.stop()
                 except Exception as exc:
-                    logger.error("[%s] error closing Nova session: %s", self.call_sid, exc)
+                    logger.error("[%s] error closing OpenAI session: %s", self.call_sid, exc)
 
             await self._wait_for_translation_tasks(timeout=1.2)
             await self._send_verified_facts_summary()
@@ -360,9 +359,6 @@ class AgentCallManager:
         done, _ = await asyncio.wait(pending, timeout=timeout)
         for task in done:
             self._translation_tasks.discard(task)
-
-    def _voice_id_for_language(self, language_code: str) -> str:
-        return voice_id_for_language(language_code, self.config.voice_gender)
 
     def _quality_metrics_payload(self) -> dict[str, int | float]:
         agent_turns = int(self._quality_metrics.get("agent_turns", 0))

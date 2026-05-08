@@ -1,15 +1,15 @@
 """
 Translation bridge — the heart of Habla.
 
-For each active phone call this module runs TWO concurrent Nova 2 Sonic
+For each active phone call this module runs TWO concurrent OpenAI Realtime
 sessions and routes audio between the four endpoints:
 
     iOS app  ←→  Session A (source→target)  ←→  Twilio phone call
     iOS app  ←→  Session B (target→source)  ←→  Twilio phone call
 
 Audio pipeline:
-    iOS mic  (PCM 16 kHz) → Session A → PCM 24 kHz → resample 8 kHz → mulaw → Twilio
-    Twilio   (mulaw 8 kHz) → PCM → resample 16 kHz → Session B → PCM 24 kHz → resample 16 kHz → iOS
+    iOS mic  (PCM 16 kHz) → resample 24 kHz → Session A → PCM 24 kHz → resample 8 kHz → mulaw → Twilio
+    Twilio   (mulaw 8 kHz) → PCM 24 kHz → Session B → PCM 24 kHz → resample 16 kHz → iOS
 """
 
 from __future__ import annotations
@@ -24,21 +24,14 @@ from typing import Optional
 
 from fastapi import WebSocket
 
-from app.nova_sonic import NovaSonicSession
+from app.openai_realtime import OpenAIRealtimeTranslationSession
 from app.audio_utils import (
     decode_twilio_media,
     encode_twilio_media,
-    mulaw_8k_to_pcm_16k,
+    mulaw_8k_to_pcm_24k,
+    pcm_16k_to_pcm_24k,
     pcm_24k_to_mulaw_8k,
     pcm_24k_to_pcm_16k,
-)
-from app.config import (
-    INPUT_SAMPLE_RATE,
-    OUTPUT_SAMPLE_RATE,
-)
-from app.language_support import (
-    build_translation_system_prompt,
-    voice_id_for_language,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,7 +61,7 @@ class _QueuedAudio:
 
 
 class TranslationBridge:
-    """Manages the two Nova sessions and all audio routing for one call."""
+    """Manages two OpenAI translation sessions and all audio routing for one call."""
 
     def __init__(
         self,
@@ -82,8 +75,8 @@ class TranslationBridge:
         self.target_language = target_language
         self.voice_gender = voice_gender
 
-        self.session_a: Optional[NovaSonicSession] = None  # source → target
-        self.session_b: Optional[NovaSonicSession] = None  # target → source
+        self.session_a: Optional[OpenAIRealtimeTranslationSession] = None  # source → target
+        self.session_b: Optional[OpenAIRealtimeTranslationSession] = None  # target → source
 
         self.ios_ws: Optional[WebSocket] = None
         self.twilio_ws: Optional[WebSocket] = None
@@ -118,14 +111,9 @@ class TranslationBridge:
         """Spin up Session A once the iOS app connects."""
         self.ios_ws = ios_ws
 
-        self.session_a = NovaSonicSession(
+        self.session_a = OpenAIRealtimeTranslationSession(
             session_id=f"{self.call_sid}-{self.source_language}-{self.target_language}-a",
-            system_prompt=build_translation_system_prompt(
-                self.source_language, self.target_language
-            ),
-            voice_id=self._voice_id_for_language(self.target_language),
-            input_sample_rate=INPUT_SAMPLE_RATE,
-            output_sample_rate=OUTPUT_SAMPLE_RATE,
+            target_language=self.target_language,
         )
         await self.session_a.start()
 
@@ -165,14 +153,9 @@ class TranslationBridge:
         self.twilio_ws = twilio_ws
         self.twilio_stream_sid = stream_sid
 
-        self.session_b = NovaSonicSession(
+        self.session_b = OpenAIRealtimeTranslationSession(
             session_id=f"{self.call_sid}-{self.target_language}-{self.source_language}-b",
-            system_prompt=build_translation_system_prompt(
-                self.target_language, self.source_language
-            ),
-            voice_id=self._voice_id_for_language(self.source_language),
-            input_sample_rate=INPUT_SAMPLE_RATE,
-            output_sample_rate=OUTPUT_SAMPLE_RATE,
+            target_language=self.source_language,
         )
         await self.session_b.start()
 
@@ -206,12 +189,12 @@ class TranslationBridge:
     # ------------------------------------------------------------------
 
     async def handle_ios_audio(self, pcm_16k: bytes) -> None:
-        """iOS app sent a PCM 16 kHz chunk — forward to Session A."""
+        """iOS app sent a PCM 16 kHz chunk — resample and forward to Session A."""
         if self.session_a and self.session_a.is_active:
             self._enqueue_input_audio(
                 self._session_a_input_queue,
                 self._session_a_input_enqueued_at,
-                pcm_16k,
+                pcm_16k_to_pcm_24k(pcm_16k),
             )
 
     async def handle_twilio_media(self, payload: str) -> None:
@@ -219,11 +202,11 @@ class TranslationBridge:
         if not self.session_b or not self.session_b.is_active:
             return
         mulaw_bytes = decode_twilio_media(payload)
-        pcm_16k = mulaw_8k_to_pcm_16k(mulaw_bytes)
+        pcm_24k = mulaw_8k_to_pcm_24k(mulaw_bytes)
         self._enqueue_input_audio(
             self._session_b_input_queue,
             self._session_b_input_enqueued_at,
-            pcm_16k,
+            pcm_24k,
         )
 
     # ------------------------------------------------------------------
@@ -451,11 +434,11 @@ class TranslationBridge:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _is_running(self, session: Optional[NovaSonicSession]) -> bool:
+    def _is_running(self, session: Optional[OpenAIRealtimeTranslationSession]) -> bool:
         return not self._closed and session is not None and session.is_active
 
     async def _dequeue(
-        self, session: Optional[NovaSonicSession]
+        self, session: Optional[OpenAIRealtimeTranslationSession]
     ) -> Optional[bytes]:
         if session is None:
             return None
@@ -565,9 +548,6 @@ class TranslationBridge:
             sink,
         )
 
-    def _voice_id_for_language(self, language_code: str) -> str:
-        return voice_id_for_language(language_code, self.voice_gender)
-
     async def _restart_session_a(self) -> bool:
         """Restart Session A after an unexpected failure."""
         try:
@@ -577,14 +557,9 @@ class TranslationBridge:
                 except Exception:
                     pass
 
-            self.session_a = NovaSonicSession(
+            self.session_a = OpenAIRealtimeTranslationSession(
                 session_id=f"{self.call_sid}-{self.source_language}-{self.target_language}-a",
-                system_prompt=build_translation_system_prompt(
-                    self.source_language, self.target_language
-                ),
-                voice_id=self._voice_id_for_language(self.target_language),
-                input_sample_rate=INPUT_SAMPLE_RATE,
-                output_sample_rate=OUTPUT_SAMPLE_RATE,
+                target_language=self.target_language,
             )
             await self.session_a.start()
             logger.info(
@@ -607,14 +582,9 @@ class TranslationBridge:
                 except Exception:
                     pass
 
-            self.session_b = NovaSonicSession(
+            self.session_b = OpenAIRealtimeTranslationSession(
                 session_id=f"{self.call_sid}-{self.target_language}-{self.source_language}-b",
-                system_prompt=build_translation_system_prompt(
-                    self.target_language, self.source_language
-                ),
-                voice_id=self._voice_id_for_language(self.source_language),
-                input_sample_rate=INPUT_SAMPLE_RATE,
-                output_sample_rate=OUTPUT_SAMPLE_RATE,
+                target_language=self.source_language,
             )
             await self.session_b.start()
             logger.info(
@@ -633,7 +603,7 @@ class TranslationBridge:
     # ------------------------------------------------------------------
 
     async def close(self) -> None:
-        """Tear down both Nova sessions and cancel routing tasks."""
+        """Tear down both OpenAI sessions and cancel routing tasks."""
         if self._closed:
             return
         self._closed = True

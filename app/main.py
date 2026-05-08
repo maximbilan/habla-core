@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="Habla",
-    description="Real-time phone call translation powered by Amazon Nova 2 Sonic",
+    description="Real-time phone call translation powered by OpenAI Realtime",
     version="0.1.0",
 )
 call_manager = CallManager()

@@ -1,4 +1,4 @@
-"""Supported Nova Sonic languages and translation helpers."""
+"""Supported languages and translation helpers."""
 
 from __future__ import annotations
 
@@ -174,3 +174,11 @@ def supported_languages_payload() -> list[dict[str, str]]:
         }
         for language in SUPPORTED_NOVA_LANGUAGES.values()
     ]
+
+
+def openai_language_code(language_code: str) -> str:
+    """Return ISO-639-1 language code expected by OpenAI Realtime language fields."""
+    language = resolve_supported_language(language_code)
+    if language:
+        return language.code.split("-", 1)[0].lower()
+    return normalize_language_code(language_code).split("-", 1)[0].lower()

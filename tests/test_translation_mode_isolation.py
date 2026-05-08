@@ -20,6 +20,7 @@ def test_translation_mode_modules_do_not_import_agent_modules() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     translation_mode_files = (
         repo_root / "app" / "translation_bridge.py",
+        repo_root / "app" / "openai_realtime.py",
         repo_root / "app" / "nova_sonic.py",
         repo_root / "app" / "language_support.py",
     )

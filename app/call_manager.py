@@ -2,7 +2,7 @@
 In-memory call state manager.
 
 Tracks every active call and its associated WebSocket connections,
-Nova sessions, and translation bridge.
+model sessions, and translation bridge.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ class CallState:
     twilio_ws: Optional[WebSocket] = None
     twilio_stream_sid: Optional[str] = None
 
-    # Translation bridge (owns the two Nova sessions)
+    # Translation bridge (owns the two model sessions)
     bridge: Optional[TranslationBridge] = None
 
     _cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -104,7 +104,7 @@ class CallManager:
             logger.info("Cleaning up call %s", call_sid)
             state.status = CallStatus.COMPLETED
 
-            # 1. close translation bridge (Nova sessions + routing tasks)
+            # 1. close translation bridge (model sessions + routing tasks)
             if state.bridge:
                 try:
                     await state.bridge.close()
