@@ -56,17 +56,22 @@ jobs:
       - name: Upload runtime secrets to EC2
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PUBLIC_URL: ${{ vars.PUBLIC_URL }}
         run: |
           set -euo pipefail
           if [ -z "${OPENAI_API_KEY}" ]; then
             echo "OPENAI_API_KEY GitHub secret is missing." >&2
             exit 1
           fi
+          if [ -z "${PUBLIC_URL}" ]; then
+            echo "PUBLIC_URL GitHub variable is missing." >&2
+            exit 1
+          fi
 
           PORT="${EC2_PORT:-22}"
-          printf '%s' "${OPENAI_API_KEY}" | ssh -p "${PORT}" -i ~/.ssh/id_ed25519 \
+          printf '%s\n%s' "${OPENAI_API_KEY}" "${PUBLIC_URL}" | ssh -p "${PORT}" -i ~/.ssh/id_ed25519 \
             "${EC2_USER}@${EC2_HOST}" \
-            "set -euo pipefail; cd \"${EC2_APP_DIR}\"; key=\$(cat); tmp=\$(mktemp); if [ -f .env ]; then grep -v '^OPENAI_API_KEY=' .env > \"\$tmp\" || true; else : > \"\$tmp\"; fi; if [ -s \"\$tmp\" ]; then printf '\n' >> \"\$tmp\"; fi; printf '# OpenAI\nOPENAI_API_KEY=%s\n' \"\$key\" >> \"\$tmp\"; mv \"\$tmp\" .env; chmod 600 .env"
+            "set -euo pipefail; cd \"${EC2_APP_DIR}\"; key=\$(sed -n '1p'); public_url=\$(sed -n '2p'); tmp=\$(mktemp); if [ -f .env ]; then grep -v -E '^(OPENAI_API_KEY|PUBLIC_URL)=' .env > \"\$tmp\" || true; else : > \"\$tmp\"; fi; if [ -s \"\$tmp\" ]; then printf '\n' >> \"\$tmp\"; fi; printf '# Runtime\nPUBLIC_URL=%s\n\n# OpenAI\nOPENAI_API_KEY=%s\n' \"\$public_url\" \"\$key\" >> \"\$tmp\"; mv \"\$tmp\" .env; chmod 600 .env"
 
       - name: Install deps and restart service
         run: |
